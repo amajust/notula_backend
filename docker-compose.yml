@@ -1,0 +1,22 @@
+services:
+  backend:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - RECALL_API_KEY=${RECALL_API_KEY}
+      - RECALL_REGION=${RECALL_REGION:-us-west-2}
+      - PORT=8080
+      # Firestore (uncomment when ready)
+      # - GCP_PROJECT_ID=${GCP_PROJECT_ID}
+      # - GOOGLE_APPLICATION_CREDENTIALS=/app/serviceAccountKey.json
+    volumes:
+      # Mount service account key for Firestore (future)
+      # - ./serviceAccountKey.json:/app/serviceAccountKey.json:ro
+      []
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
