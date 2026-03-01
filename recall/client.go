@@ -60,9 +60,6 @@ func (c *Client) CreateBot(meetingURL string, joinAt *time.Time) (*BotResponse, 
 		MeetingURL: meetingURL,
 		BotName:    "Notbot",
 		JoinAt:     joinAt,
-		TranscriptionOptions: map[string]interface{}{
-			"provider": "gladia",
-		},
 	}
 	return c.postBot(req)
 }
@@ -90,6 +87,16 @@ func (c *Client) GetBot(botID string) (*BotResponse, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&bot); err != nil {
 		return nil, err
 	}
+
+	// Check if any status change indicates a fatal error
+	for _, sc := range bot.StatusChanges {
+		if code, ok := sc["code"].(string); ok && code == "fatal" {
+			errMsg, _ := sc["message"].(string)
+			subCode, _ := sc["sub_code"].(string)
+			return &bot, fmt.Errorf("bot fatal error: %s (sub_code: %s)", errMsg, subCode)
+		}
+	}
+
 	return &bot, nil
 }
 

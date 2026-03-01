@@ -9,6 +9,8 @@ RUN go mod download
 
 # Copy source and build
 COPY . .
+# Run unit tests
+RUN go test -v ./...
 RUN CGO_ENABLED=0 GOOS=linux go build -o notulapro-backend ./main.go
 
 # ── Run stage ─────────────────────────────────────────────────────────────────

@@ -1,4 +1,39 @@
-.env
-*.json
-serviceAccountKey.json
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
 /notulapro-backend
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Environment variables
+.env
+
+# Firebase / GCP Service Account Key
+serviceAccountKey.json
+
+# JSON files (if ignoring all json files was intended for local testing)
+*.json
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific files
+.DS_Store
+Thumbs.db
