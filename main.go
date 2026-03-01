@@ -79,7 +79,7 @@ func main() {
 
 	// ─── Protected routes (require valid Firebase ID token) ───────────────────────
 	recallClient := recall.New()
-	botHandler := handlers.NewBotHandler(recallClient)
+	botHandler := handlers.NewBotHandler(recallClient, firestoreClient)
 	recordingHandler := handlers.NewRecordingHandler(firestoreClient)
 
 	api := app.Group("/api/v1", middleware.FirebaseAuth(authClient))

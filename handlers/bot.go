@@ -1,21 +1,25 @@
 package handlers
 
 import (
+	"log"
 	"time"
 
 	"notulapro-backend/recall"
+
+	"cloud.google.com/go/firestore"
 
 	"github.com/gofiber/fiber/v2"
 )
 
 // BotHandler holds handler methods for bot-related routes.
 type BotHandler struct {
-	recall *recall.Client
+	recall    *recall.Client
+	firestore *firestore.Client
 }
 
-// NewBotHandler creates a handler with an initialized Recall.ai client.
-func NewBotHandler(r *recall.Client) *BotHandler {
-	return &BotHandler{recall: r}
+// NewBotHandler creates a handler with an initialized Recall.ai client and Firestore client.
+func NewBotHandler(r *recall.Client, fs *firestore.Client) *BotHandler {
+	return &BotHandler{recall: r, firestore: fs}
 }
 
 // ─── Request bodies ───────────────────────────────────────────────────────────
@@ -47,6 +51,24 @@ func (h *BotHandler) SendBot(c *fiber.Ctx) error {
 		})
 	}
 
+	// Check if a bot already exists for this exact meeting URL
+	// Note: You can optionally filter this by active statuses (e.g., "joining", "in_call")
+	// using Firestore queries to ensure we don't block subsequent meetings on the same static link.
+	iter := h.firestore.Collection("bots").
+		Where("meeting_url", "==", body.MeetingURL).
+		Where("status", "in", []string{"joining", "in_call_recording", "in_call_not_recording"}).
+		Limit(1).
+		Documents(c.Context())
+
+	doc, err := iter.Next()
+	if err == nil && doc.Exists() {
+		// An active bot already exists for this URL
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error":  "A bot is already active in this meeting URL.",
+			"bot_id": doc.Data()["id"],
+		})
+	}
+
 	bot, err := h.recall.CreateBot(body.MeetingURL, nil)
 	if err != nil {
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
@@ -54,7 +76,25 @@ func (h *BotHandler) SendBot(c *fiber.Ctx) error {
 		})
 	}
 
-	// TODO: save bot to Firestore for tracking
+	uid, ok := c.Locals("uid").(string)
+	if !ok {
+		uid = "unknown" // fallback if auth isn't strict yet
+	}
+
+	// Save the new bot to Firestore for tracking and deduplication
+	_, err = h.firestore.Collection("bots").Doc(bot.ID).Set(c.Context(), map[string]interface{}{
+		"id":          bot.ID,
+		"uid":         uid, // Tie the bot to the person who requested it
+		"meeting_url": body.MeetingURL,
+		"status":      "joining",
+		"created_at":  time.Now(),
+	})
+
+	if err != nil {
+		// Soft error - the bot was still created on Recall, but we failed to track it locally.
+		// We'll log it but not fail the HTTP request so the user's app doesn't break.
+		log.Printf("failed to save bot %s to firestore: %v", bot.ID, err)
+	}
 
 	return c.Status(fiber.StatusCreated).JSON(bot)
 }
@@ -85,6 +125,22 @@ func (h *BotHandler) ScheduleBot(c *fiber.Ctx) error {
 		})
 	}
 
+	// Check if a scheduled bot already exists for this exact meeting URL
+	iter := h.firestore.Collection("bots").
+		Where("meeting_url", "==", body.MeetingURL).
+		Where("status", "in", []string{"scheduled", "joining", "in_call_recording", "in_call_not_recording"}).
+		Limit(1).
+		Documents(c.Context())
+
+	doc, err := iter.Next()
+	if err == nil && doc.Exists() {
+		// A bot is already attached to this URL
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error":  "A bot is already active or scheduled for this meeting URL.",
+			"bot_id": doc.Data()["id"],
+		})
+	}
+
 	bot, err := h.recall.CreateBot(body.MeetingURL, &body.JoinAt)
 	if err != nil {
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
@@ -92,7 +148,24 @@ func (h *BotHandler) ScheduleBot(c *fiber.Ctx) error {
 		})
 	}
 
-	// TODO: save scheduled bot to Firestore
+	uid, ok := c.Locals("uid").(string)
+	if !ok {
+		uid = "unknown"
+	}
+
+	// Save scheduled bot to Firestore
+	_, err = h.firestore.Collection("bots").Doc(bot.ID).Set(c.Context(), map[string]interface{}{
+		"id":          bot.ID,
+		"uid":         uid,
+		"meeting_url": body.MeetingURL,
+		"status":      "scheduled",
+		"created_at":  time.Now(),
+		"join_at":     body.JoinAt,
+	})
+
+	if err != nil {
+		log.Printf("failed to save scheduled bot %s to firestore: %v", bot.ID, err)
+	}
 
 	return c.Status(fiber.StatusCreated).JSON(bot)
 }
