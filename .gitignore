@@ -37,3 +37,6 @@ serviceAccountKey.json
 # OS specific files
 .DS_Store
 Thumbs.db
+
+# Audio uploads
+handlers/uploads/
