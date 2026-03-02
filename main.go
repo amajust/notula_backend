@@ -104,12 +104,13 @@ func main() {
 	// ─── Handlers ───
 	botHandler := handlers.NewBotHandler(recallClient, botRepo, gcsClient)
 	recordingHandler := handlers.NewRecordingHandler(recordingRepo, gladiaClient)
-	webhookHandler := handlers.NewWebhookHandler(recallClient, botRepo, recordingRepo, gcsClient)
+	webhookHandler := handlers.NewWebhookHandler(recallClient, botRepo, recordingRepo, gcsClient, gladiaClient)
 
 	api := app.Group("/api/v1", middleware.FirebaseAuth(authClient))
 
 	// Webhooks (usually unauthenticated or secret-based, but grouping under /api for now)
 	app.Post("/api/v1/webhook/recall", webhookHandler.RecallWebhook)
+	app.Post("/api/v1/webhook/gladia", webhookHandler.GladiaWebhook)
 
 	// Bot routes
 	api.Post("/bot/send", botHandler.SendBot)

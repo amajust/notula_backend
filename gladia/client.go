@@ -85,10 +85,16 @@ func (c *Client) Upload(filePath string) (string, error) {
 }
 
 // Transcribe triggers transcription for a given audio_url.
-func (c *Client) Transcribe(audioURL string) (*TranscriptionResponse, error) {
-	payload := map[string]string{
+// If callbackURL is provided, it configures Gladia to send a webhook.
+func (c *Client) Transcribe(audioURL string, callbackURL string) (*TranscriptionResponse, error) {
+	payload := map[string]interface{}{
 		"audio_url": audioURL,
 	}
+
+	if callbackURL != "" {
+		payload["callback_url"] = callbackURL
+	}
+
 	jsonBody, _ := json.Marshal(payload)
 
 	req, err := http.NewRequest("POST", BaseURL+"/pre-recorded", bytes.NewBuffer(jsonBody))
@@ -124,7 +130,7 @@ func (c *Client) UploadAndTranscribe(filePath string) (*TranscriptionResponse, e
 	if err != nil {
 		return nil, err
 	}
-	return c.Transcribe(audioURL)
+	return c.Transcribe(audioURL, "")
 }
 
 type ResultResponse struct {

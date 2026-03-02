@@ -18,10 +18,15 @@ import (
 
 type mockGladiaClient struct {
 	uploadAndTranscribeFunc func(filePath string) (*gladia.TranscriptionResponse, error)
+	transcribeFunc          func(audioURL string, callbackURL string) (*gladia.TranscriptionResponse, error)
 }
 
 func (m *mockGladiaClient) UploadAndTranscribe(filePath string) (*gladia.TranscriptionResponse, error) {
 	return m.uploadAndTranscribeFunc(filePath)
+}
+
+func (m *mockGladiaClient) Transcribe(audioURL string, callbackURL string) (*gladia.TranscriptionResponse, error) {
+	return m.transcribeFunc(audioURL, callbackURL)
 }
 
 type mockRecordingRepository struct {

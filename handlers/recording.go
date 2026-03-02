@@ -16,6 +16,7 @@ import (
 
 // GladiaClient defines the interface for interacting with Gladia.io.
 type GladiaClient interface {
+	Transcribe(audioURL string, callbackURL string) (*gladia.TranscriptionResponse, error)
 	UploadAndTranscribe(filePath string) (*gladia.TranscriptionResponse, error)
 }
 

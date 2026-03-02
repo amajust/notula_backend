@@ -4,21 +4,24 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 
 	"notulapro-backend/storage"
 
 	"github.com/gofiber/fiber/v2"
 )
 
+// WebhookHandler handles incoming notifications.
 type WebhookHandler struct {
 	recall  RecallClient
 	botRepo BotRepository
 	recRepo RecordingRepository
 	storage *storage.GCSClient
+	gladia  GladiaClient
 }
 
-func NewWebhookHandler(r RecallClient, br BotRepository, rr RecordingRepository, s *storage.GCSClient) *WebhookHandler {
-	return &WebhookHandler{recall: r, botRepo: br, recRepo: rr, storage: s}
+func NewWebhookHandler(r RecallClient, br BotRepository, rr RecordingRepository, s *storage.GCSClient, g GladiaClient) *WebhookHandler {
+	return &WebhookHandler{recall: r, botRepo: br, recRepo: rr, storage: s, gladia: g}
 }
 
 // RecallWebhook handles incoming notifications from Recall.ai.
@@ -47,7 +50,11 @@ func (h *WebhookHandler) RecallWebhook(c *fiber.Ctx) error {
 			h.handleBotDone(c, payload.Data.BotID)
 		}
 	case "transcript.done":
+		// We no longer handle Recall's internal transcript.done directly here if we use Gladia.
+		// However, keeping it for backward compatibility or dual-use if needed.
 		h.handleTranscriptDone(c, payload.Data.BotID)
+	case "gladia.transcription.done": // Custom event if we handle Gladia results here
+		// Actually, Gladia's webhook hits its own endpoint.
 	}
 
 	return c.SendStatus(fiber.StatusOK)
@@ -68,11 +75,13 @@ func (h *WebhookHandler) handleBotDone(c *fiber.Ctx, botID string) {
 		return
 	}
 
-	recordingID := bot.Recordings[0].ID
+	recordingURL := bot.Recordings[0].MediaShortcuts.VideoMixed.URL
 
-	// 2. Trigger asynchronous transcription
-	if err := h.recall.StartAsyncTranscription(recordingID); err != nil {
-		log.Printf("Failed to start transcription for recording %s: %v", recordingID, err)
+	// 2. Trigger asynchronous transcription via Gladia
+	callbackURL := fmt.Sprintf("%s/api/v1/webhook/gladia?bot_id=%s", os.Getenv("BASE_URL"), botID)
+	_, err = h.gladia.Transcribe(recordingURL, callbackURL)
+	if err != nil {
+		log.Printf("Failed to start Gladia transcription for bot %s: %v", botID, err)
 	}
 
 	// 3. Update status in repository
@@ -99,6 +108,45 @@ func (h *WebhookHandler) handleTranscriptDone(c *fiber.Ctx, botID string) {
 	go h.archiveToGCS(botID)
 
 	log.Printf("Successfully processed transcript for bot %s", botID)
+}
+
+// GladiaWebhook handles incoming results from Gladia.
+func (h *WebhookHandler) GladiaWebhook(c *fiber.Ctx) error {
+	botID := c.Query("bot_id")
+	if botID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bot_id is required"})
+	}
+
+	var payload struct {
+		Event string `json:"event"`
+		Data  struct {
+			ID            string `json:"id"`
+			Status        string `json:"status"`
+			Transcription any    `json:"transcription"`
+		} `json:"data"`
+	}
+
+	if err := c.BodyParser(&payload); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid payload"})
+	}
+
+	if payload.Event != "transcription.done" {
+		log.Printf("Gladia webhook event %s for bot %s - ignoring", payload.Event, botID)
+		return c.SendStatus(fiber.StatusOK)
+	}
+
+	log.Printf("Gladia transcript for bot %s is ready, saving...", botID)
+
+	// Persist transcript to Firestore
+	if err := h.botRepo.SaveTranscript(c.Context(), botID, payload.Data.Transcription); err != nil {
+		log.Printf("Failed to save Gladia transcript for bot %s: %v", botID, err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save transcript"})
+	}
+
+	// Archive to GCS in background
+	go h.archiveToGCS(botID)
+
+	return c.SendStatus(fiber.StatusOK)
 }
 
 func (h *WebhookHandler) archiveToGCS(botID string) {
