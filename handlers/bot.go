@@ -1,25 +1,38 @@
 package handlers
 
 import (
+	"context"
 	"log"
-	"time"
-
 	"notulapro-backend/recall"
-
-	"cloud.google.com/go/firestore"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 )
 
-// BotHandler holds handler methods for bot-related routes.
-type BotHandler struct {
-	recall    *recall.Client
-	firestore *firestore.Client
+// RecallClient defines the interface for interacting with Recall.ai.
+type RecallClient interface {
+	CreateBot(meetingURL string, joinAt *time.Time) (*recall.BotResponse, error)
+	GetBot(botID string) (*recall.BotResponse, error)
+	LeaveBot(botID string) error
+	StartAsyncTranscription(recordingID string) error
 }
 
-// NewBotHandler creates a handler with an initialized Recall.ai client and Firestore client.
-func NewBotHandler(r *recall.Client, fs *firestore.Client) *BotHandler {
-	return &BotHandler{recall: r, firestore: fs}
+// BotRepository defines the interface for persisting bot data.
+type BotRepository interface {
+	GetActiveBotByMeetingURL(ctx context.Context, meetingURL string) (string, error)
+	GetScheduledBotByMeetingURL(ctx context.Context, meetingURL string) (string, error)
+	SaveBot(ctx context.Context, bot map[string]interface{}) error
+}
+
+// BotHandler holds handler methods for bot-related routes.
+type BotHandler struct {
+	recall RecallClient
+	repo   BotRepository
+}
+
+// NewBotHandler creates a handler with a RecallClient and BotRepository.
+func NewBotHandler(r RecallClient, repo BotRepository) *BotHandler {
+	return &BotHandler{recall: r, repo: repo}
 }
 
 // ─── Request bodies ───────────────────────────────────────────────────────────
@@ -52,20 +65,12 @@ func (h *BotHandler) SendBot(c *fiber.Ctx) error {
 	}
 
 	// Check if a bot already exists for this exact meeting URL
-	// Note: You can optionally filter this by active statuses (e.g., "joining", "in_call")
-	// using Firestore queries to ensure we don't block subsequent meetings on the same static link.
-	iter := h.firestore.Collection("bots").
-		Where("meeting_url", "==", body.MeetingURL).
-		Where("status", "in", []string{"joining", "in_call_recording", "in_call_not_recording"}).
-		Limit(1).
-		Documents(c.Context())
-
-	doc, err := iter.Next()
-	if err == nil && doc.Exists() {
+	botID, err := h.repo.GetActiveBotByMeetingURL(c.Context(), body.MeetingURL)
+	if err == nil && botID != "" {
 		// An active bot already exists for this URL
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"error":  "A bot is already active in this meeting URL.",
-			"bot_id": doc.Data()["id"],
+			"bot_id": botID,
 		})
 	}
 
@@ -82,7 +87,7 @@ func (h *BotHandler) SendBot(c *fiber.Ctx) error {
 	}
 
 	// Save the new bot to Firestore for tracking and deduplication
-	_, err = h.firestore.Collection("bots").Doc(bot.ID).Set(c.Context(), map[string]interface{}{
+	err = h.repo.SaveBot(c.Context(), map[string]interface{}{
 		"id":          bot.ID,
 		"uid":         uid, // Tie the bot to the person who requested it
 		"meeting_url": body.MeetingURL,
@@ -126,18 +131,12 @@ func (h *BotHandler) ScheduleBot(c *fiber.Ctx) error {
 	}
 
 	// Check if a scheduled bot already exists for this exact meeting URL
-	iter := h.firestore.Collection("bots").
-		Where("meeting_url", "==", body.MeetingURL).
-		Where("status", "in", []string{"scheduled", "joining", "in_call_recording", "in_call_not_recording"}).
-		Limit(1).
-		Documents(c.Context())
-
-	doc, err := iter.Next()
-	if err == nil && doc.Exists() {
+	botID, err := h.repo.GetScheduledBotByMeetingURL(c.Context(), body.MeetingURL)
+	if err == nil && botID != "" {
 		// A bot is already attached to this URL
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"error":  "A bot is already active or scheduled for this meeting URL.",
-			"bot_id": doc.Data()["id"],
+			"bot_id": botID,
 		})
 	}
 
@@ -154,7 +153,7 @@ func (h *BotHandler) ScheduleBot(c *fiber.Ctx) error {
 	}
 
 	// Save scheduled bot to Firestore
-	_, err = h.firestore.Collection("bots").Doc(bot.ID).Set(c.Context(), map[string]interface{}{
+	err = h.repo.SaveBot(c.Context(), map[string]interface{}{
 		"id":          bot.ID,
 		"uid":         uid,
 		"meeting_url": body.MeetingURL,

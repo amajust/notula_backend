@@ -13,9 +13,11 @@ import (
 	"github.com/joho/godotenv"
 	"google.golang.org/api/option"
 
+	"notulapro-backend/gladia"
 	"notulapro-backend/handlers"
 	"notulapro-backend/middleware"
 	"notulapro-backend/recall"
+	"notulapro-backend/repository"
 )
 
 func main() {
@@ -27,6 +29,12 @@ func main() {
 	if os.Getenv("RECALL_API_KEY") == "" {
 		log.Fatal("RECALL_API_KEY environment variable is required")
 	}
+
+	gladiaAPIKey := os.Getenv("GLADIA_API_KEY")
+	if gladiaAPIKey == "" {
+		log.Println("⚠️ GLADIA_API_KEY not set. Offline transcriptions will fail.")
+	}
+	gladiaClient := gladia.NewClient(gladiaAPIKey)
 
 	// ─── Firebase Admin SDK ───────────────────────────────────────────────────────
 	ctx := context.Background()
@@ -79,8 +87,11 @@ func main() {
 
 	// ─── Protected routes (require valid Firebase ID token) ───────────────────────
 	recallClient := recall.New()
-	botHandler := handlers.NewBotHandler(recallClient, firestoreClient)
-	recordingHandler := handlers.NewRecordingHandler(firestoreClient)
+	botRepo := repository.NewFirestoreBotRepository(firestoreClient)
+	botHandler := handlers.NewBotHandler(recallClient, botRepo)
+
+	recordingRepo := repository.NewFirestoreRecordingRepository(firestoreClient)
+	recordingHandler := handlers.NewRecordingHandler(recordingRepo, gladiaClient)
 
 	api := app.Group("/api/v1", middleware.FirebaseAuth(authClient))
 

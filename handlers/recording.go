@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"log"
+	"notulapro-backend/gladia"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,12 +14,24 @@ import (
 	"github.com/google/uuid"
 )
 
-type RecordingHandler struct {
-	firestore *firestore.Client
+// GladiaClient defines the interface for interacting with Gladia.io.
+type GladiaClient interface {
+	UploadAndTranscribe(filePath string) (*gladia.TranscriptionResponse, error)
 }
 
-func NewRecordingHandler(fs *firestore.Client) *RecordingHandler {
-	return &RecordingHandler{firestore: fs}
+// RecordingRepository defines the interface for persisting recording data.
+type RecordingRepository interface {
+	SaveRecording(ctx context.Context, recording map[string]interface{}) error
+	UpdateRecording(ctx context.Context, id string, updates []firestore.Update) error
+}
+
+type RecordingHandler struct {
+	repo   RecordingRepository
+	gladia GladiaClient
+}
+
+func NewRecordingHandler(repo RecordingRepository, g GladiaClient) *RecordingHandler {
+	return &RecordingHandler{repo: repo, gladia: g}
 }
 
 // UploadOfflineRecording handles multipart upload of audio files + tags for in-person meetings.
@@ -69,7 +83,7 @@ func (h *RecordingHandler) UploadOfflineRecording(c *fiber.Ctx) error {
 
 	// 4. Save Metadata to Firestore
 	recordID := uuid.New().String()
-	_, err = h.firestore.Collection("recordings").Doc(recordID).Set(context.Background(), map[string]interface{}{
+	err = h.repo.SaveRecording(context.Background(), map[string]interface{}{
 		"id":        recordID,
 		"uid":       uid,
 		"title":     title,
@@ -87,10 +101,26 @@ func (h *RecordingHandler) UploadOfflineRecording(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save metadata to firestore"})
 	}
 
+	// 5. Trigger Gladia Transcription Asynchronously
+	// We do this after saving to Firestore so we have a record even if Gladia fails
+	gladiaRes, err := h.gladia.UploadAndTranscribe(filePath)
+	if err != nil {
+		// Log error but don't fail the request - we can retry later if needed
+		// In a real app, you might add this to a background job queue
+		log.Printf("failed to trigger gladia transcription for %s: %v", recordID, err)
+	} else {
+		// Update Firestore with Gladia ID
+		_ = h.repo.UpdateRecording(context.Background(), recordID, []firestore.Update{
+			{Path: "gladiaId", Value: gladiaRes.ID},
+			{Path: "status", Value: "transcribing"},
+		})
+	}
+
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"id":      recordID,
-		"message": "In-person meeting recorded and saved",
-		"title":   title,
-		"tags":    tags,
+		"id":        recordID,
+		"message":   "In-person meeting recorded and saved. Transcription started.",
+		"title":     title,
+		"tags":      tags,
+		"gladia_id": gladiaRes.ID,
 	})
 }
