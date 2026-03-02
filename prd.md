@@ -1,55 +1,68 @@
-# Product Requirements Document: Notula Pro
+# Executive Product Requirements Document: Notula Pro
 
 ## 1. Executive Summary
-Notula Pro is a meeting intelligence platform that automates documentation for virtual and in-person meetings. It leverages AI to provide transcription, summarization, and organized notes.
+Notula Pro is an AI-powered meeting intelligence platform designed to eliminate manual documentation. By centralizing virtual (Recall.ai) and in-person (Gladia) meeting data into a single, searchable "Professional Memory," we empower teams to focus on decision-making rather than note-taking.
 
-## 2. Problem Statement
-Manual note-taking is inefficient and prone to error. Virtual meetings often lack a centralized, searchable record of discussions, while in-person meetings are even harder to document systematically.
+## 2. Strategic Objectives (Success Metrics)
+To measure the impact of Notula Pro, the platform must achieve the following KPIs:
+- **Transcription Latency**: 1 hour of meeting audio processed and synced within < 2 minutes.
+- **Search Retrieval Time**: Full-text search across 100+ transcripts in < 500ms.
+- **Cost Efficiency**: Long-term storage cost per user maintained at < $0.05/month via Hybrid GCS Archiving.
+- **Reliability**: 99.9% success rate for Bot joining and recording stability.
 
-## 3. Product Vision
-To be the "memory" for every professional interaction, allowing users to focus on the conversation rather than the documentation.
+## 3. Targeted User Personas & Stories
 
-## 4. Target Audience
-- Project Managers
-- Researchers and Journalists
-- Enterprise Teams
-- Freelancers
+### Personas
+- **The Project Lead**: Managing high-stakes team discussions and deliverables.
+- **The Consultant**: Conducting on-site visits where mobile, offline capture is critical.
+- **The Analyst**: Deep-diving into historical data to find recurring business insights.
+- **The Business Owner**: Guarding sensitive client IP and ensuring organization-wide compliance.
 
-## 5. Key Features
+### User Stories (The "Why")
+- **The Project Lead**: *As a Project Lead, I want a bot to handle all meeting capture automatically, **so that I can lead the discussion without the distraction of manual note-taking.***
+- **The Consultant**: *As a Consultant, I want to upload high-quality voice recordings from my phone after a client site visit, **so that I have a verified transcript of requirements without needing a laptop.***
+- **The Analyst**: *As an Analyst, I want to perform a global search across months of transcripts, **so that I can identify recurring patterns and insights across different stakeholders instantly.***
+- **The Business Owner**: *As a Business Owner, I want my meeting data isolated by user-ID and stored in private vaults, **so that I can guarantee my clients' intellectual property is never exposed to unauthorized parties.***
 
-### 5.1. Virtual Meeting Bot (Recall.ai)
-- Automatically join Zoom, Google Meet, and MS Teams.
-- Capture audio and video.
-- Real-time bot status tracking (Joining, In-call, Recording).
+## 4. Functional Requirements
 
-### 5.2. In-Person Meeting Recording (Gladia Integration)
-- **Offline Upload**: Support for uploading high-quality audio recordings post-meeting.
-- **Asynchronous Transcription**: Fast processing (1 hour of audio in < 1 minute).
-- **Metadata Support**: Title, tags, and speaker identification.
+### 4.1. Unified Meeting Capture
+- **Virtual (Recall.ai)**: Automated bots for Zoom, Google Meet, and MS Teams with real-time status tracking.
+- **In-Person (Offline)**: High-speed asynchronous upload and transcription for local recordings.
+- **Speaker Diarization**: Identification of different speakers to provide context in transcripts.
 
-### 5.3. Meeting Intelligence
-- Automated transcription via Gladia and Recall.ai.
-- (Roadmap) LLM-powered summarization and action item extraction.
-- (Roadmap) Speaker diarization.
+### 4.2. Post-Meeting Intelligence Workflow
+- **Automated Ingest**: Webhooks trigger immediate transcription upon meeting termination.
+- **Hybrid Storage Strategy**: 
+    - **Firestore**: Searchable text index & metadata.
+    - **GCS (Vault)**: Permanent, private storage of high-resolution media.
+    - **Recall.ai**: Transient capture engine with 7-day auto-deletion to minimize costs.
 
-## 6. Technical Architecture
+## 5. Security & Privacy (Executive Grade)
+- **Data Sovereignty**: Ownership-validated access. UID checks mandatory for all media requests.
+- **Signed URL Access**: Temporary, short-lived (15 min) Google Cloud Signed URLs for secure playback.
+- **Architecture Isolation**: UID-specific directory structures in GCS (`recordings/<uid>/...`).
+- **Encryption**: Data encrypted at rest (AES-256) and in transit (TLS 1.2+).
 
-### 6.1. Tech Stack
-- **Backend**: Go (Fiber)
-- **Database**: Firebase Firestore
-- **Auth**: Firebase Auth
-- **Orchestration**: Recall.ai
-- **Transcription (Offline)**: Gladia API
+## 6. Scope & Roadmap
 
-### 6.2. In-Person Meeting Flow (Recommendation)
-For maximum reliability, we recommend the **Local Record & Upload** approach for in-person meetings:
-1. **App Level**: Record audio locally on the device (ensures no data loss on network drops).
-2. **Backend Level**: Upload the completed file to the `/recording/offline` endpoint.
-3. **Gladia Integration**: Backend forwards the audio to Gladia's Asynchronous API for high-speed transcription.
+### In-Scope (V1)
+- Core Fiber Backend with Firestore Integration.
+- Recall.ai Bot Lifecycle & Webhook Automation.
+- Gladia V2 Offline Upload Integration.
+- Hybrid GCS Archiving & Signed URL Retrieval.
 
-## 7. Compliance & Security
-- Data isolation via Firebase UID.
-- Secure API key management via environment variables.
+### Out-of-Scope (V1)
+- Real-time live transcription (Roadmap V2).
+- Native Mobile iOS/Android Recording App (Roadmap V2).
+- Automatic Calendar Sync (Outlook/Google) — (Scheduled for V1.1).
 
-## 8. Git Tracking
-This document is tracked in the repository to ensure alignment across the development team.
+## 7. Technical Architecture Summary
+- **Backend**: Go (Fiber) for high-concurrency performance.
+- **Database**: Cloud Firestore for searchable metadata.
+- **Storage**: Private Google Cloud Storage (GCS) Buckets.
+- **Auth**: Firebase Identity Platform.
+
+## 8. Compliance
+- **GDPR Ready**: Support for "Right to be Forgotten" via automated GCS/Firestore deletion hooks.
+- **Audit Logs**: Tracking of internal API calls for data access.

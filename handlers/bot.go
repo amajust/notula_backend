@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"notulapro-backend/recall"
+	"notulapro-backend/storage"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -15,24 +16,30 @@ type RecallClient interface {
 	GetBot(botID string) (*recall.BotResponse, error)
 	LeaveBot(botID string) error
 	StartAsyncTranscription(recordingID string) error
+	GetTranscript(botID string) ([]recall.TranscriptElement, error)
+	DeleteMedia(botID string) error
 }
 
 // BotRepository defines the interface for persisting bot data.
 type BotRepository interface {
 	GetActiveBotByMeetingURL(ctx context.Context, meetingURL string) (string, error)
 	GetScheduledBotByMeetingURL(ctx context.Context, meetingURL string) (string, error)
+	GetBotByID(ctx context.Context, botID string) (map[string]interface{}, error)
 	SaveBot(ctx context.Context, bot map[string]interface{}) error
+	UpdateBotStatus(ctx context.Context, botID string, status string) error
+	SaveTranscript(ctx context.Context, botID string, transcript interface{}) error
 }
 
 // BotHandler holds handler methods for bot-related routes.
 type BotHandler struct {
-	recall RecallClient
-	repo   BotRepository
+	recall  RecallClient
+	repo    BotRepository
+	storage *storage.GCSClient
 }
 
-// NewBotHandler creates a handler with a RecallClient and BotRepository.
-func NewBotHandler(r RecallClient, repo BotRepository) *BotHandler {
-	return &BotHandler{recall: r, repo: repo}
+// NewBotHandler creates a handler with dependencies.
+func NewBotHandler(r RecallClient, repo BotRepository, s *storage.GCSClient) *BotHandler {
+	return &BotHandler{recall: r, repo: repo, storage: s}
 }
 
 // ─── Request bodies ───────────────────────────────────────────────────────────
@@ -92,7 +99,10 @@ func (h *BotHandler) SendBot(c *fiber.Ctx) error {
 		"uid":         uid, // Tie the bot to the person who requested it
 		"meeting_url": body.MeetingURL,
 		"status":      "joining",
-		"created_at":  time.Now(),
+		"type":        "virtual",
+		"title":       "Virtual Meeting " + time.Now().Format("2006-01-02 15:04"),
+		"tags":        []string{"Meeting"},
+		"createdAt":   time.Now(),
 	})
 
 	if err != nil {
@@ -158,7 +168,10 @@ func (h *BotHandler) ScheduleBot(c *fiber.Ctx) error {
 		"uid":         uid,
 		"meeting_url": body.MeetingURL,
 		"status":      "scheduled",
-		"created_at":  time.Now(),
+		"type":        "virtual",
+		"title":       "Scheduled: " + body.MeetingURL,
+		"tags":        []string{"Scheduled"},
+		"createdAt":   time.Now(),
 		"join_at":     body.JoinAt,
 	})
 
@@ -211,23 +224,51 @@ func (h *BotHandler) LeaveBot(c *fiber.Ctx) error {
 }
 
 // StartTranscript godoc
-// POST /recording/:id/transcript
-// Trigger Gladia async transcription for a completed recording.
+// ...
 func (h *BotHandler) StartTranscript(c *fiber.Ctx) error {
-	recordingID := c.Params("id")
-	if recordingID == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "recording id is required",
-		})
-	}
-
-	if err := h.recall.StartAsyncTranscription(recordingID); err != nil {
-		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	// TODO: update Firestore record with transcription status
-
+	// ... existing code ...
 	return c.JSON(fiber.Map{"message": "async transcription started"})
+}
+
+// GetRecordingURL godoc
+// GET /recording/:id/url
+// Get a secure signed URL for a recording.
+func (h *BotHandler) GetRecordingURL(c *fiber.Ctx) error {
+	botID := c.Params("id")
+	uid, ok := c.Locals("uid").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	// 1. Verify ownership
+	bot, err := h.repo.GetBotByID(c.Context(), botID)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "recording not found"})
+	}
+
+	if bot["uid"] != uid {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "you do not have permission to access this recording"})
+	}
+
+	// 2. Check if archived or still on Recall
+	if bot["status"] == "archived" {
+		mediaPath, _ := bot["media_path"].(string)
+		if mediaPath == "" {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "media path not found"})
+		}
+
+		signedURL, err := h.storage.GenerateSignedURL(mediaPath, 15*time.Minute)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to generate signed url"})
+		}
+		return c.JSON(fiber.Map{"url": signedURL})
+	}
+
+	// Fallback to Recall if not yet archived
+	recallBot, err := h.recall.GetBot(botID)
+	if err != nil || len(recallBot.Recordings) == 0 {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "recording not available yet"})
+	}
+
+	return c.JSON(fiber.Map{"url": recallBot.Recordings[0].MediaShortcuts.VideoMixed.URL})
 }

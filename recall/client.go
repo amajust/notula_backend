@@ -43,13 +43,32 @@ type BotResponse struct {
 	ID            string                   `json:"id"`
 	StatusChanges []map[string]interface{} `json:"status_changes"`
 	Recordings    []struct {
-		ID string `json:"id"`
+		ID              string `json:"id"`
+		DurationSeconds int    `json:"duration_seconds"`
+		MediaShortcuts  struct {
+			VideoMixed struct {
+				URL string `json:"url"`
+			} `json:"video_mixed"`
+		} `json:"media_shortcuts"`
 	} `json:"recordings"`
 }
 
 type CreateTranscriptRequest struct {
 	Provider    map[string]interface{} `json:"provider"`
 	Diarization map[string]interface{} `json:"diarization,omitempty"`
+}
+
+type TranscriptResponse struct {
+	ID      string `json:"id"`
+	Status  string `json:"status"`
+	Summary string `json:"summary"`
+}
+
+type TranscriptElement struct {
+	Speaker string  `json:"speaker"`
+	Text    string  `json:"text"`
+	Start   float64 `json:"start"`
+	End     float64 `json:"end"`
 }
 
 // ─── Bot methods ─────────────────────────────────────────────────────────────
@@ -181,6 +200,50 @@ func (c *Client) postBot(payload CreateBotRequest) (*BotResponse, error) {
 		return nil, err
 	}
 	return &bot, nil
+}
+
+// GetTranscript fetches the completed transcript for a recording.
+func (c *Client) GetTranscript(botID string) ([]TranscriptElement, error) {
+	url := fmt.Sprintf("%s/bot/%s/transcript/", c.baseURL, botID)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.setHeaders(req)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if err := c.checkStatus(resp); err != nil {
+		return nil, err
+	}
+
+	var transcript []TranscriptElement
+	if err := json.NewDecoder(resp.Body).Decode(&transcript); err != nil {
+		return nil, err
+	}
+	return transcript, nil
+}
+
+// DeleteMedia deletes the recording media for a bot to stop storage charges.
+func (c *Client) DeleteMedia(botID string) error {
+	url := fmt.Sprintf("%s/bot/%s/delete_media/", c.baseURL, botID)
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	c.setHeaders(req)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return c.checkStatus(resp)
 }
 
 func (c *Client) setHeaders(req *http.Request) {

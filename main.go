@@ -18,6 +18,7 @@ import (
 	"notulapro-backend/middleware"
 	"notulapro-backend/recall"
 	"notulapro-backend/repository"
+	"notulapro-backend/storage"
 )
 
 func main() {
@@ -86,14 +87,29 @@ func main() {
 	})
 
 	// ─── Protected routes (require valid Firebase ID token) ───────────────────────
+	// ─── Clients & Repositories ───
 	recallClient := recall.New()
 	botRepo := repository.NewFirestoreBotRepository(firestoreClient)
-	botHandler := handlers.NewBotHandler(recallClient, botRepo)
-
 	recordingRepo := repository.NewFirestoreRecordingRepository(firestoreClient)
+
+	gcsBucket := os.Getenv("GCS_BUCKET")
+	if gcsBucket == "" {
+		gcsBucket = "notula-recordings"
+	}
+	gcsClient, err := storage.NewGCSClient(ctx, gcsBucket)
+	if err != nil {
+		log.Printf("Warning: GCS storage not initialized: %v", err)
+	}
+
+	// ─── Handlers ───
+	botHandler := handlers.NewBotHandler(recallClient, botRepo, gcsClient)
 	recordingHandler := handlers.NewRecordingHandler(recordingRepo, gladiaClient)
+	webhookHandler := handlers.NewWebhookHandler(recallClient, botRepo, recordingRepo, gcsClient)
 
 	api := app.Group("/api/v1", middleware.FirebaseAuth(authClient))
+
+	// Webhooks (usually unauthenticated or secret-based, but grouping under /api for now)
+	app.Post("/api/v1/webhook/recall", webhookHandler.RecallWebhook)
 
 	// Bot routes
 	api.Post("/bot/send", botHandler.SendBot)
@@ -101,8 +117,8 @@ func main() {
 	api.Get("/bot/:id", botHandler.GetBotStatus)
 	api.Post("/bot/:id/leave", botHandler.LeaveBot)
 
-	// Recording / transcription routes
-	api.Post("/recording/:id/transcript", botHandler.StartTranscript)
+	// Recording routes
+	api.Get("/recording/:id/url", botHandler.GetRecordingURL)
 	api.Post("/recording/offline", recordingHandler.UploadOfflineRecording)
 
 	// ─── Start ────────────────────────────────────────────────────────────────────

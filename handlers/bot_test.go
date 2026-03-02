@@ -21,6 +21,8 @@ type mockRecallClient struct {
 	getBotFunc                  func(botID string) (*recall.BotResponse, error)
 	leaveBotFunc                func(botID string) error
 	startAsyncTranscriptionFunc func(recordingID string) error
+	getTranscriptFunc           func(botID string) ([]recall.TranscriptElement, error)
+	deleteMediaFunc             func(botID string) error
 }
 
 func (m *mockRecallClient) CreateBot(meetingURL string, joinAt *time.Time) (*recall.BotResponse, error) {
@@ -35,11 +37,20 @@ func (m *mockRecallClient) LeaveBot(botID string) error {
 func (m *mockRecallClient) StartAsyncTranscription(recordingID string) error {
 	return m.startAsyncTranscriptionFunc(recordingID)
 }
+func (m *mockRecallClient) GetTranscript(botID string) ([]recall.TranscriptElement, error) {
+	return m.getTranscriptFunc(botID)
+}
+func (m *mockRecallClient) DeleteMedia(botID string) error {
+	return m.deleteMediaFunc(botID)
+}
 
 type mockBotRepository struct {
 	getActiveBotFunc    func(ctx context.Context, meetingURL string) (string, error)
 	getScheduledBotFunc func(ctx context.Context, meetingURL string) (string, error)
 	saveBotFunc         func(ctx context.Context, bot map[string]interface{}) error
+	getBotByIDFunc      func(ctx context.Context, botID string) (map[string]interface{}, error)
+	updateBotStatusFunc func(ctx context.Context, botID string, status string) error
+	saveTranscriptFunc  func(ctx context.Context, botID string, transcript interface{}) error
 }
 
 func (m *mockBotRepository) GetActiveBotByMeetingURL(ctx context.Context, meetingURL string) (string, error) {
@@ -50,6 +61,15 @@ func (m *mockBotRepository) GetScheduledBotByMeetingURL(ctx context.Context, mee
 }
 func (m *mockBotRepository) SaveBot(ctx context.Context, bot map[string]interface{}) error {
 	return m.saveBotFunc(ctx, bot)
+}
+func (m *mockBotRepository) GetBotByID(ctx context.Context, botID string) (map[string]interface{}, error) {
+	return m.getBotByIDFunc(ctx, botID)
+}
+func (m *mockBotRepository) UpdateBotStatus(ctx context.Context, botID string, status string) error {
+	return m.updateBotStatusFunc(ctx, botID, status)
+}
+func (m *mockBotRepository) SaveTranscript(ctx context.Context, botID string, transcript interface{}) error {
+	return m.saveTranscriptFunc(ctx, botID, transcript)
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -75,7 +95,7 @@ func TestBotHandler_SendBot_Success(t *testing.T) {
 		},
 	}
 
-	handler := NewBotHandler(mockRecall, mockRepo)
+	handler := NewBotHandler(mockRecall, mockRepo, nil)
 
 	app.Post("/bot/send", func(c *fiber.Ctx) error {
 		c.Locals("uid", "user-123")
@@ -104,7 +124,7 @@ func TestBotHandler_SendBot_Conflict(t *testing.T) {
 		},
 	}
 
-	handler := NewBotHandler(nil, mockRepo)
+	handler := NewBotHandler(nil, mockRepo, nil)
 	app.Post("/bot/send", handler.SendBot)
 
 	body := sendBotBody{MeetingURL: "https://zoom.us/j/123"}
@@ -138,7 +158,7 @@ func TestBotHandler_ScheduleBot_Success(t *testing.T) {
 		},
 	}
 
-	handler := NewBotHandler(mockRecall, mockRepo)
+	handler := NewBotHandler(mockRecall, mockRepo, nil)
 
 	app.Post("/bot/schedule", func(c *fiber.Ctx) error {
 		c.Locals("uid", "user-123")
@@ -164,7 +184,7 @@ func TestBotHandler_ScheduleBot_Success(t *testing.T) {
 
 func TestBotHandler_ScheduleBot_TooSoon(t *testing.T) {
 	app := fiber.New()
-	handler := NewBotHandler(nil, nil)
+	handler := NewBotHandler(nil, nil, nil)
 
 	app.Post("/bot/schedule", handler.ScheduleBot)
 
@@ -192,7 +212,7 @@ func TestBotHandler_GetBotStatus(t *testing.T) {
 			return &recall.BotResponse{ID: botID}, nil
 		},
 	}
-	handler := NewBotHandler(mockRecall, nil)
+	handler := NewBotHandler(mockRecall, nil, nil)
 	app.Get("/bot/:id", handler.GetBotStatus)
 
 	req := httptest.NewRequest(http.MethodGet, "/bot/bot-123", nil)
@@ -210,7 +230,7 @@ func TestBotHandler_LeaveBot(t *testing.T) {
 			return nil
 		},
 	}
-	handler := NewBotHandler(mockRecall, nil)
+	handler := NewBotHandler(mockRecall, nil, nil)
 	app.Post("/bot/:id/leave", handler.LeaveBot)
 
 	req := httptest.NewRequest(http.MethodPost, "/bot/bot-123/leave", nil)
@@ -228,7 +248,7 @@ func TestBotHandler_StartTranscript(t *testing.T) {
 			return nil
 		},
 	}
-	handler := NewBotHandler(mockRecall, nil)
+	handler := NewBotHandler(mockRecall, nil, nil)
 	app.Post("/recording/:id/transcript", handler.StartTranscript)
 
 	req := httptest.NewRequest(http.MethodPost, "/recording/rec-123/transcript", nil)
