@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"notulapro-backend/storage"
 
+	"cloud.google.com/go/firestore"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -113,9 +115,7 @@ func (h *WebhookHandler) handleTranscriptDone(c *fiber.Ctx, botID string) {
 // GladiaWebhook handles incoming results from Gladia.
 func (h *WebhookHandler) GladiaWebhook(c *fiber.Ctx) error {
 	botID := c.Query("bot_id")
-	if botID == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bot_id is required"})
-	}
+	recordingID := c.Query("recording_id") // For offline recordings
 
 	var payload struct {
 		Event string `json:"event"`
@@ -123,6 +123,7 @@ func (h *WebhookHandler) GladiaWebhook(c *fiber.Ctx) error {
 			ID            string `json:"id"`
 			Status        string `json:"status"`
 			Transcription any    `json:"transcription"`
+			Error         string `json:"error"` // Error message if transcription failed
 		} `json:"data"`
 	}
 
@@ -130,22 +131,79 @@ func (h *WebhookHandler) GladiaWebhook(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid payload"})
 	}
 
-	if payload.Event != "transcription.done" {
-		log.Printf("Gladia webhook event %s for bot %s - ignoring", payload.Event, botID)
+	// Handle transcription completion
+	if payload.Event == "transcription.done" {
+		log.Printf("Gladia transcript for %s is ready, saving...", recordingID)
+
+		// For offline recordings, update status to "completed"
+		if recordingID != "" {
+			updates := []firestore.Update{
+				{Path: "status", Value: "completed"},
+				{Path: "processingCompletedAt", Value: time.Now()},
+			}
+
+			if payload.Data.Transcription != nil {
+				updates = append(updates, firestore.Update{Path: "transcript", Value: payload.Data.Transcription})
+			}
+
+			if err := h.recRepo.UpdateRecording(c.Context(), recordingID, updates); err != nil {
+				log.Printf("Failed to update offline recording %s status: %v", recordingID, err)
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update recording status"})
+			}
+
+			log.Printf("Successfully processed offline recording %s", recordingID)
+			return c.SendStatus(fiber.StatusOK)
+		}
+
+		// For virtual recordings (bot-based), use existing logic
+		if err := h.botRepo.SaveTranscript(c.Context(), botID, payload.Data.Transcription); err != nil {
+			log.Printf("Failed to save Gladia transcript for bot %s: %v", botID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save transcript"})
+		}
+
+		// Archive to GCS in background
+		go h.archiveToGCS(botID)
+
 		return c.SendStatus(fiber.StatusOK)
 	}
 
-	log.Printf("Gladia transcript for bot %s is ready, saving...", botID)
+	// Handle transcription failure
+	if payload.Event == "transcription.failed" || payload.Data.Status == "failed" {
+		errorMsg := payload.Data.Error
+		if errorMsg == "" {
+			errorMsg = "Transcription failed without error message"
+		}
 
-	// Persist transcript to Firestore
-	if err := h.botRepo.SaveTranscript(c.Context(), botID, payload.Data.Transcription); err != nil {
-		log.Printf("Failed to save Gladia transcript for bot %s: %v", botID, err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save transcript"})
+		log.Printf("Gladia transcription failed for recording %s: %s", recordingID, errorMsg)
+
+		// For offline recordings, update status to "failed"
+		if recordingID != "" {
+			updates := []firestore.Update{
+				{Path: "status", Value: "failed"},
+				{Path: "uploadError", Value: errorMsg},
+				{Path: "processingCompletedAt", Value: time.Now()},
+			}
+
+			if err := h.recRepo.UpdateRecording(c.Context(), recordingID, updates); err != nil {
+				log.Printf("Failed to update offline recording %s status to failed: %v", recordingID, err)
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update recording status"})
+			}
+
+			log.Printf("Marked offline recording %s as failed", recordingID)
+			return c.SendStatus(fiber.StatusOK)
+		}
+
+		// For virtual recordings (bot-based), update bot status
+		if botID != "" {
+			if err := h.botRepo.UpdateBotStatus(c.Context(), botID, "failed"); err != nil {
+				log.Printf("Failed to update bot %s status to failed: %v", botID, err)
+			}
+			log.Printf("Marked bot %s as failed", botID)
+			return c.SendStatus(fiber.StatusOK)
+		}
 	}
 
-	// Archive to GCS in background
-	go h.archiveToGCS(botID)
-
+	log.Printf("Gladia webhook event %s - ignoring", payload.Event)
 	return c.SendStatus(fiber.StatusOK)
 }
 

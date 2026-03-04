@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"time"
 
 	firebase "firebase.google.com/go/v4"
 	"github.com/gofiber/fiber/v2"
@@ -101,10 +102,32 @@ func main() {
 		log.Printf("Warning: GCS storage not initialized: %v", err)
 	}
 
+	// Initialize Firebase Storage client
+	firebaseBucket := os.Getenv("FIREBASE_STORAGE_BUCKET")
+	if firebaseBucket == "" {
+		firebaseBucket = "notulapro.firebasestorage.app"
+	}
+	firebaseStorageClient, err := storage.NewFirebaseStorageClient(ctx, firebaseBucket)
+	if err != nil {
+		log.Printf("Warning: Firebase Storage not initialized: %v", err)
+	}
+
 	// ─── Handlers ───
 	botHandler := handlers.NewBotHandler(recallClient, botRepo, gcsClient)
-	recordingHandler := handlers.NewRecordingHandler(recordingRepo, gladiaClient)
+	recordingHandler := handlers.NewRecordingHandler(recordingRepo, gladiaClient, firebaseStorageClient)
 	webhookHandler := handlers.NewWebhookHandler(recallClient, botRepo, recordingRepo, gcsClient, gladiaClient)
+
+	// ─── Recovery: Check for stuck recordings on startup ───
+	baseURL := os.Getenv("BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:8080"
+	}
+	go func() {
+		time.Sleep(5 * time.Second) // Wait for server to be ready
+		if err := handlers.RecoverStuckRecordings(ctx, recordingRepo, gladiaClient, firebaseStorageClient, baseURL); err != nil {
+			log.Printf("[Recovery] Error during startup recovery: %v", err)
+		}
+	}()
 
 	api := app.Group("/api/v1", middleware.FirebaseAuth(authClient))
 

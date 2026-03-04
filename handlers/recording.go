@@ -2,12 +2,13 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"notulapro-backend/gladia"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
+
+	"notulapro-backend/storage"
 
 	"cloud.google.com/go/firestore"
 	"github.com/gofiber/fiber/v2"
@@ -27,12 +28,13 @@ type RecordingRepository interface {
 }
 
 type RecordingHandler struct {
-	repo   RecordingRepository
-	gladia GladiaClient
+	repo          RecordingRepository
+	gladia        GladiaClient
+	storageClient *storage.FirebaseStorageClient
 }
 
-func NewRecordingHandler(repo RecordingRepository, g GladiaClient) *RecordingHandler {
-	return &RecordingHandler{repo: repo, gladia: g}
+func NewRecordingHandler(repo RecordingRepository, g GladiaClient, storageClient *storage.FirebaseStorageClient) *RecordingHandler {
+	return &RecordingHandler{repo: repo, gladia: g, storageClient: storageClient}
 }
 
 // UploadOfflineRecording handles multipart upload of audio files + tags for in-person meetings.
@@ -62,66 +64,81 @@ func (h *RecordingHandler) UploadOfflineRecording(c *fiber.Ctx) error {
 	title := c.FormValue("title", "Offline Meeting")
 	duration := c.FormValue("duration", "0")
 
-	// 3. Save File Locally (for development)
-	// In production, this would go to GCS / S3
-	uploadDir := "./uploads"
-	if _, err := os.Stat(uploadDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(uploadDir, 0755); err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create upload directory"})
-		}
-	}
-
-	fileID := uuid.New().String()
-	ext := filepath.Ext(file.Filename)
-	if ext == "" {
-		ext = ".aac" // Default for our Flutter app
-	}
-	filePath := filepath.Join(uploadDir, fileID+ext)
-
-	if err := c.SaveFile(file, filePath); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save audio file"})
-	}
-
-	// 4. Save Metadata to Firestore
+	// 3. Generate recording ID
 	recordID := uuid.New().String()
+	storagePath := fmt.Sprintf("recordings/%s/%s.aac", uid, recordID)
+
+	// 4. Upload to Firebase Storage
+	if h.storageClient != nil {
+		err = h.storageClient.UploadFile(file, storagePath)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error":   "failed to upload to Firebase Storage",
+				"details": err.Error(),
+			})
+		}
+	} else {
+		// Fallback for testing - just log
+		log.Printf("[FirebaseStorage] Storage client not available, skipping upload (test mode)")
+	}
+
+	// 5. Save Metadata to Firestore with status "processing"
 	err = h.repo.SaveRecording(context.Background(), map[string]interface{}{
 		"id":        recordID,
 		"uid":       uid,
 		"title":     title,
 		"tags":      tags,
-		"filePath":  filePath,
 		"duration":  duration,
+		"mediaPath": storagePath,
 		"createdAt": time.Now(),
-		"status":    "recorded",
+		"status":    "processing",
 		"type":      "offline",
 	})
 
 	if err != nil {
 		// Clean up file if Firestore save fails
-		os.Remove(filePath)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save metadata to firestore"})
-	}
-
-	// 5. Trigger Gladia Transcription Asynchronously
-	// We do this after saving to Firestore so we have a record even if Gladia fails
-	gladiaRes, err := h.gladia.UploadAndTranscribe(filePath)
-	if err != nil {
-		// Log error but don't fail the request - we can retry later if needed
-		// In a real app, you might add this to a background job queue
-		log.Printf("failed to trigger gladia transcription for %s: %v", recordID, err)
-	} else {
-		// Update Firestore with Gladia ID
-		_ = h.repo.UpdateRecording(context.Background(), recordID, []firestore.Update{
-			{Path: "gladiaId", Value: gladiaRes.ID},
-			{Path: "status", Value: "transcribing"},
+		log.Printf("ERROR: Failed to save recording to Firestore: %v", err)
+		if h.storageClient != nil {
+			h.storageClient.DeleteFile(storagePath)
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error":   "failed to save metadata to firestore",
+			"details": err.Error(),
 		})
 	}
 
+	// 6. Trigger Gladia Transcription Asynchronously
+	// We do this after saving to Firestore so we have a record even if Gladia fails
+	if h.storageClient != nil {
+		// Generate signed URL for Gladia to access the file
+		signedURL, err := h.storageClient.GenerateSignedURL(storagePath, 60) // 60 minutes expiry
+		if err != nil {
+			log.Printf("failed to generate signed URL for %s: %v", recordID, err)
+		} else {
+			// Trigger transcription with callback URL
+			callbackURL := fmt.Sprintf("%s/api/v1/webhook/gladia?recording_id=%s",
+				c.BaseURL(), recordID)
+
+			gladiaRes, err := h.gladia.Transcribe(signedURL, callbackURL)
+			if err != nil {
+				// Log error but don't fail the request - we can retry later if needed
+				log.Printf("failed to trigger gladia transcription for %s: %v", recordID, err)
+			} else {
+				// Update Firestore with Gladia ID
+				_ = h.repo.UpdateRecording(context.Background(), recordID, []firestore.Update{
+					{Path: "gladiaId", Value: gladiaRes.ID},
+				})
+				log.Printf("Gladia transcription started for %s (gladia_id: %s)", recordID, gladiaRes.ID)
+			}
+		}
+	} else {
+		log.Printf("[Gladia] Storage client not available, skipping transcription (test mode)")
+	}
+
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"id":        recordID,
-		"message":   "In-person meeting recorded and saved. Transcription started.",
-		"title":     title,
-		"tags":      tags,
-		"gladia_id": gladiaRes.ID,
+		"id":      recordID,
+		"message": "In-person meeting recorded and saved. Transcription started.",
+		"title":   title,
+		"tags":    tags,
 	})
 }

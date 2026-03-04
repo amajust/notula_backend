@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"log"
 
 	"cloud.google.com/go/firestore"
 )
@@ -17,9 +18,16 @@ func NewFirestoreRecordingRepository(client *firestore.Client) *FirestoreRecordi
 func (r *FirestoreRecordingRepository) SaveRecording(ctx context.Context, recording map[string]interface{}) error {
 	id, ok := recording["id"].(string)
 	if !ok || id == "" {
+		log.Printf("ERROR: SaveRecording called with invalid or missing ID")
 		return nil
 	}
+	log.Printf("Attempting to save recording to Firestore: id=%s, uid=%v", id, recording["uid"])
 	_, err := r.client.Collection("recordings").Doc(id).Set(ctx, recording)
+	if err != nil {
+		log.Printf("ERROR: Firestore Set failed: %v", err)
+	} else {
+		log.Printf("SUCCESS: Recording saved to Firestore: id=%s", id)
+	}
 	return err
 }
 
