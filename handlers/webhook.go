@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"notulapro-backend/storage"
+	"notulapro-backend/utils"
 
 	"cloud.google.com/go/firestore"
 	"github.com/gofiber/fiber/v2"
@@ -190,8 +191,7 @@ func (h *WebhookHandler) GladiaWebhook(c *fiber.Ctx) error {
 			}
 
 			if err := h.recRepo.UpdateRecording(c.Context(), recordingID, updates); err != nil {
-				log.Printf("Failed to update offline recording %s status: %v", recordingID, err)
-				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update recording status"})
+				return utils.HandleError(c, fiber.StatusInternalServerError, "Failed to update offline recording status", err)
 			}
 
 			log.Printf("Successfully processed offline recording %s", recordingID)
@@ -200,8 +200,7 @@ func (h *WebhookHandler) GladiaWebhook(c *fiber.Ctx) error {
 
 		// For virtual recordings (bot-based), use existing logic
 		if err := h.botRepo.SaveTranscript(c.Context(), botID, payload.Data.Transcription); err != nil {
-			log.Printf("Failed to save Gladia transcript for bot %s: %v", botID, err)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save transcript"})
+			return utils.HandleError(c, fiber.StatusInternalServerError, "Failed to save Gladia transcript for bot", err)
 		}
 
 		// Archive to GCS in background
@@ -228,8 +227,7 @@ func (h *WebhookHandler) GladiaWebhook(c *fiber.Ctx) error {
 			}
 
 			if err := h.recRepo.UpdateRecording(c.Context(), recordingID, updates); err != nil {
-				log.Printf("Failed to update offline recording %s status to failed: %v", recordingID, err)
-				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update recording status"})
+				return utils.HandleError(c, fiber.StatusInternalServerError, "Failed to update offline recording status to failed", err)
 			}
 
 			log.Printf("Marked offline recording %s as failed", recordingID)

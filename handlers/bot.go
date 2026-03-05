@@ -2,9 +2,9 @@ package handlers
 
 import (
 	"context"
-	"log"
 	"notulapro-backend/recall"
 	"notulapro-backend/storage"
+	"notulapro-backend/utils"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -76,10 +76,7 @@ func (h *BotHandler) SendBot(c *fiber.Ctx) error {
 	botID, err := h.repo.GetActiveBotByMeetingURL(c.Context(), body.MeetingURL)
 	if err == nil && botID != "" {
 		// An active bot already exists for this URL
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"error":  "A bot is already active in this meeting URL.",
-			"bot_id": botID,
-		})
+		return utils.HandleError(c, fiber.StatusConflict, "A bot is already active in this meeting URL.", err)
 	}
 
 	botName := "Notbot"
@@ -89,9 +86,7 @@ func (h *BotHandler) SendBot(c *fiber.Ctx) error {
 
 	bot, err := h.recall.CreateBot(body.MeetingURL, botName, nil)
 	if err != nil {
-		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
-			"error": err.Error(),
-		})
+		return utils.HandleError(c, fiber.StatusBadGateway, "Failed to connect to the recording service. Please check the meeting URL or try again later.", err)
 	}
 
 	uid, ok := c.Locals("uid").(string)
@@ -112,9 +107,7 @@ func (h *BotHandler) SendBot(c *fiber.Ctx) error {
 	})
 
 	if err != nil {
-		// Soft error - the bot was still created on Recall, but we failed to track it locally.
-		// We'll log it but not fail the HTTP request so the user's app doesn't break.
-		log.Printf("failed to save bot %s to firestore: %v", bot.ID, err)
+		utils.HandleError(c, fiber.StatusInternalServerError, "Soft Error: Failed to save bot locally", err)
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(bot)
@@ -150,10 +143,7 @@ func (h *BotHandler) ScheduleBot(c *fiber.Ctx) error {
 	botID, err := h.repo.GetScheduledBotByMeetingURL(c.Context(), body.MeetingURL)
 	if err == nil && botID != "" {
 		// A bot is already attached to this URL
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"error":  "A bot is already active or scheduled for this meeting URL.",
-			"bot_id": botID,
-		})
+		return utils.HandleError(c, fiber.StatusConflict, "A bot is already active or scheduled for this meeting URL.", err)
 	}
 
 	botName := "Notbot"
@@ -163,9 +153,7 @@ func (h *BotHandler) ScheduleBot(c *fiber.Ctx) error {
 
 	bot, err := h.recall.CreateBot(body.MeetingURL, botName, &body.JoinAt)
 	if err != nil {
-		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
-			"error": err.Error(),
-		})
+		return utils.HandleError(c, fiber.StatusBadGateway, "Failed to schedule the recording bot. Please check the meeting URL and try again.", err)
 	}
 
 	uid, ok := c.Locals("uid").(string)
@@ -187,7 +175,7 @@ func (h *BotHandler) ScheduleBot(c *fiber.Ctx) error {
 	})
 
 	if err != nil {
-		log.Printf("failed to save scheduled bot %s to firestore: %v", bot.ID, err)
+		utils.HandleError(c, fiber.StatusInternalServerError, "Soft Error: Failed to save scheduled bot to firestore", err)
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(bot)
@@ -206,9 +194,7 @@ func (h *BotHandler) GetBotStatus(c *fiber.Ctx) error {
 
 	bot, err := h.recall.GetBot(botID)
 	if err != nil {
-		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
-			"error": err.Error(),
-		})
+		return utils.HandleError(c, fiber.StatusBadGateway, "Failed to fetch bot status", err)
 	}
 
 	return c.JSON(bot)
@@ -226,9 +212,7 @@ func (h *BotHandler) LeaveBot(c *fiber.Ctx) error {
 	}
 
 	if err := h.recall.LeaveBot(botID); err != nil {
-		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
-			"error": err.Error(),
-		})
+		return utils.HandleError(c, fiber.StatusBadGateway, "Failed to tell the bot to leave the meeting", err)
 	}
 
 	return c.JSON(fiber.Map{"message": "bot is leaving the call"})
@@ -254,7 +238,7 @@ func (h *BotHandler) GetRecordingURL(c *fiber.Ctx) error {
 	// 1. Verify ownership
 	bot, err := h.repo.GetBotByID(c.Context(), botID)
 	if err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "recording not found"})
+		return utils.HandleError(c, fiber.StatusNotFound, "Recording not found", err)
 	}
 
 	if bot["uid"] != uid {
@@ -270,7 +254,7 @@ func (h *BotHandler) GetRecordingURL(c *fiber.Ctx) error {
 
 		signedURL, err := h.storage.GenerateSignedURL(mediaPath, 15*time.Minute)
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to generate signed url"})
+			return utils.HandleError(c, fiber.StatusInternalServerError, "Failed to generate signed url", err)
 		}
 		return c.JSON(fiber.Map{"url": signedURL})
 	}

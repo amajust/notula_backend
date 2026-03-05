@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"notulapro-backend/gladia"
+	"notulapro-backend/utils"
 	"strings"
 	"time"
 
@@ -47,7 +48,7 @@ func (h *RecordingHandler) UploadOfflineRecording(c *fiber.Ctx) error {
 	// 1. Parse File
 	file, err := c.FormFile("audio")
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "audio file is required"})
+		return utils.HandleError(c, fiber.StatusBadRequest, "audio file is required", err)
 	}
 
 	// 2. Parse Metadata
@@ -72,10 +73,7 @@ func (h *RecordingHandler) UploadOfflineRecording(c *fiber.Ctx) error {
 	if h.storageClient != nil {
 		err = h.storageClient.UploadFile(file, storagePath)
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error":   "failed to upload to Firebase Storage",
-				"details": err.Error(),
-			})
+			return utils.HandleError(c, fiber.StatusInternalServerError, "failed to upload to Firebase Storage", err)
 		}
 	} else {
 		// Fallback for testing - just log
@@ -97,14 +95,10 @@ func (h *RecordingHandler) UploadOfflineRecording(c *fiber.Ctx) error {
 
 	if err != nil {
 		// Clean up file if Firestore save fails
-		log.Printf("ERROR: Failed to save recording to Firestore: %v", err)
 		if h.storageClient != nil {
 			h.storageClient.DeleteFile(storagePath)
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error":   "failed to save metadata to firestore",
-			"details": err.Error(),
-		})
+		return utils.HandleError(c, fiber.StatusInternalServerError, "failed to save metadata to firestore", err)
 	}
 
 	// 6. Trigger Gladia Transcription Asynchronously
