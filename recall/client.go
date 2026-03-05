@@ -74,10 +74,14 @@ type TranscriptElement struct {
 // ─── Bot methods ─────────────────────────────────────────────────────────────
 
 // CreateBot sends or schedules Notbot for a meeting.
-func (c *Client) CreateBot(meetingURL string, joinAt *time.Time) (*BotResponse, error) {
+func (c *Client) CreateBot(meetingURL string, botName string, joinAt *time.Time) (*BotResponse, error) {
+	if botName == "" {
+		botName = "Notbot"
+	}
+
 	req := CreateBotRequest{
 		MeetingURL: meetingURL,
-		BotName:    "Notbot",
+		BotName:    botName,
 		JoinAt:     joinAt,
 	}
 	return c.postBot(req)

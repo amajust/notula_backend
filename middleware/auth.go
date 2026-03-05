@@ -39,6 +39,11 @@ func FirebaseAuth(client *auth.Client) fiber.Handler {
 
 		// Store UID so handlers can use it (e.g. for Firestore scoping)
 		c.Locals("uid", token.UID)
+
+		if name, ok := token.Claims["name"].(string); ok {
+			c.Locals("name", name)
+		}
+
 		return c.Next()
 	}
 }

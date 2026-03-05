@@ -43,7 +43,7 @@ func TestClient_CreateBot(t *testing.T) {
 	defer server.Close()
 
 	joinAt := time.Now().Add(1 * time.Hour)
-	bot, err := client.CreateBot("https://zoom.us/j/123", &joinAt)
+	bot, err := client.CreateBot("https://zoom.us/j/123", "TestBot", &joinAt)
 
 	if err != nil {
 		t.Fatalf("CreateBot returned error: %v", err)
@@ -79,7 +79,7 @@ func TestClient_ErrorHandling(t *testing.T) {
 	server, client := setupMockServer(http.StatusBadRequest, map[string]string{"error": "invalid meeting URL"})
 	defer server.Close()
 
-	_, err := client.CreateBot("invalid-url", nil)
+	_, err := client.CreateBot("invalid-url", "", nil)
 
 	if err == nil {
 		t.Fatal("Expected an error for a 400 response, but got nil")

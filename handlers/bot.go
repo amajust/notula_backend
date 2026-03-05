@@ -12,7 +12,7 @@ import (
 
 // RecallClient defines the interface for interacting with Recall.ai.
 type RecallClient interface {
-	CreateBot(meetingURL string, joinAt *time.Time) (*recall.BotResponse, error)
+	CreateBot(meetingURL string, botName string, joinAt *time.Time) (*recall.BotResponse, error)
 	GetBot(botID string) (*recall.BotResponse, error)
 	LeaveBot(botID string) error
 	StartAsyncTranscription(recordingID string) error
@@ -81,7 +81,12 @@ func (h *BotHandler) SendBot(c *fiber.Ctx) error {
 		})
 	}
 
-	bot, err := h.recall.CreateBot(body.MeetingURL, nil)
+	botName := "Notbot"
+	if name, ok := c.Locals("name").(string); ok && name != "" {
+		botName = "Notbot on behalf of " + name
+	}
+
+	bot, err := h.recall.CreateBot(body.MeetingURL, botName, nil)
 	if err != nil {
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
 			"error": err.Error(),
@@ -150,7 +155,12 @@ func (h *BotHandler) ScheduleBot(c *fiber.Ctx) error {
 		})
 	}
 
-	bot, err := h.recall.CreateBot(body.MeetingURL, &body.JoinAt)
+	botName := "Notbot"
+	if name, ok := c.Locals("name").(string); ok && name != "" {
+		botName = "Notbot on behalf of " + name
+	}
+
+	bot, err := h.recall.CreateBot(body.MeetingURL, botName, &body.JoinAt)
 	if err != nil {
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
 			"error": err.Error(),

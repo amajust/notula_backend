@@ -17,7 +17,7 @@ import (
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
 type mockRecallClient struct {
-	createBotFunc               func(meetingURL string, joinAt *time.Time) (*recall.BotResponse, error)
+	createBotFunc               func(meetingURL string, botName string, joinAt *time.Time) (*recall.BotResponse, error)
 	getBotFunc                  func(botID string) (*recall.BotResponse, error)
 	leaveBotFunc                func(botID string) error
 	startAsyncTranscriptionFunc func(recordingID string) error
@@ -25,8 +25,8 @@ type mockRecallClient struct {
 	deleteMediaFunc             func(botID string) error
 }
 
-func (m *mockRecallClient) CreateBot(meetingURL string, joinAt *time.Time) (*recall.BotResponse, error) {
-	return m.createBotFunc(meetingURL, joinAt)
+func (m *mockRecallClient) CreateBot(meetingURL string, botName string, joinAt *time.Time) (*recall.BotResponse, error) {
+	return m.createBotFunc(meetingURL, botName, joinAt)
 }
 func (m *mockRecallClient) GetBot(botID string) (*recall.BotResponse, error) {
 	return m.getBotFunc(botID)
@@ -78,7 +78,7 @@ func TestBotHandler_SendBot_Success(t *testing.T) {
 	app := fiber.New()
 
 	mockRecall := &mockRecallClient{
-		createBotFunc: func(meetingURL string, joinAt *time.Time) (*recall.BotResponse, error) {
+		createBotFunc: func(meetingURL string, botName string, joinAt *time.Time) (*recall.BotResponse, error) {
 			return &recall.BotResponse{ID: "bot-123"}, nil
 		},
 	}
@@ -144,7 +144,7 @@ func TestBotHandler_ScheduleBot_Success(t *testing.T) {
 	app := fiber.New()
 
 	mockRecall := &mockRecallClient{
-		createBotFunc: func(meetingURL string, joinAt *time.Time) (*recall.BotResponse, error) {
+		createBotFunc: func(meetingURL string, botName string, joinAt *time.Time) (*recall.BotResponse, error) {
 			return &recall.BotResponse{ID: "bot-scheduled"}, nil
 		},
 	}
