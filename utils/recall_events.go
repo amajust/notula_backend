@@ -24,8 +24,10 @@ func GetFriendlyProcessingStatus(status string) string {
 		return "Bot leaving breakout room"
 	case "breakout_room_closed":
 		return "Breakout rooms closed"
-	case "recorded", "recording_done", "done", "transcript.done":
-		return "Fetching Transcript..."
+	case "recording_done":
+		return "Media Ready (Fetching Transcript...)"
+	case "recorded", "done", "transcript.done":
+		return "Recorded (Transcript Ready)"
 	case "transcript.processing":
 		return "Processing transcript text..."
 	case "transcript.failed", "failed", "call_ended", "fatal":

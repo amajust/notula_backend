@@ -147,7 +147,7 @@ func (h *WebhookHandler) archiveToGCS(botID string) {
 	}
 
 	// Recall URLs expire, so we fetch a fresh one
-	downloadURL := bot.Recordings[0].MediaShortcuts.VideoMixed.URL
+	downloadURL := bot.Recordings[0].MediaShortcuts.VideoMixed.Data.DownloadURL
 	if downloadURL == "" {
 		log.Printf("Archive failed: no download URL for bot %s", botID)
 		return

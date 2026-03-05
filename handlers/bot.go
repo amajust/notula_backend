@@ -268,5 +268,5 @@ func (h *BotHandler) GetRecordingURL(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "recording not available yet"})
 	}
 
-	return c.JSON(fiber.Map{"url": recallBot.Recordings[0].MediaShortcuts.VideoMixed.URL})
+	return c.JSON(fiber.Map{"url": recallBot.Recordings[0].MediaShortcuts.VideoMixed.Data.DownloadURL})
 }

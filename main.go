@@ -95,20 +95,24 @@ func main() {
 	botRepo := repository.NewFirestoreBotRepository(firestoreClient)
 	recordingRepo := repository.NewFirestoreRecordingRepository(firestoreClient)
 
+	firebaseBucket := os.Getenv("FIREBASE_STORAGE_BUCKET")
+	if firebaseBucket == "" {
+		firebaseBucket = "notulapro.firebasestorage.app"
+	}
+
 	gcsBucket := os.Getenv("GCS_BUCKET")
 	if gcsBucket == "" {
-		gcsBucket = "notula-recordings"
+		// Fallback to firebase bucket as a more sensible default than a hardcoded string
+		gcsBucket = firebaseBucket
 	}
+	log.Printf("[Storage] Using GCS bucket: %s", gcsBucket)
+
 	gcsClient, err := storage.NewGCSClient(ctx, gcsBucket)
 	if err != nil {
 		log.Printf("Warning: GCS storage not initialized: %v", err)
 	}
 
-	// Initialize Firebase Storage client
-	firebaseBucket := os.Getenv("FIREBASE_STORAGE_BUCKET")
-	if firebaseBucket == "" {
-		firebaseBucket = "notulapro.firebasestorage.app"
-	}
+	log.Printf("[Storage] Using Firebase Storage bucket: %s", firebaseBucket)
 	firebaseStorageClient, err := storage.NewFirebaseStorageClient(ctx, firebaseBucket)
 	if err != nil {
 		log.Printf("Warning: Firebase Storage not initialized: %v", err)

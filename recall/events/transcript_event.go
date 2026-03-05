@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 )
 
 type TranscriptEventProcessor struct {
@@ -17,8 +18,8 @@ func NewTranscriptEventProcessor(br BotRepository, r RecallClient, s GCSClient) 
 	return &TranscriptEventProcessor{BotRepo: br, Recall: r, Storage: s}
 }
 
-func (p *TranscriptEventProcessor) Process(ctx context.Context, event string, botID string, recordingID string) error {
-	log.Printf("[TranscriptEvent] Processing %s for bot %s (recording %s)", event, botID, recordingID)
+func (p *TranscriptEventProcessor) Process(ctx context.Context, event string, botID string, recordingID string, transcriptID string) error {
+	log.Printf("[TranscriptEvent] Processing %s for bot %s (recording %s, transcript %s)", event, botID, recordingID, transcriptID)
 
 	if event != "transcript.done" {
 		// Sync the status to Firestore for lifecycle visibility
@@ -37,24 +38,30 @@ func (p *TranscriptEventProcessor) Process(ctx context.Context, event string, bo
 		}
 	}
 
-	if recordingID == "" {
-		return fmt.Errorf("missing recording ID for bot %s", botID)
+	// 1. Fetch transcript from Recall using Transcript ID (Modern v2 Flow)
+	if transcriptID == "" {
+		// Fallback to recording ID if transcript ID is missing (should not happen for transcript.done)
+		transcriptID = recordingID
 	}
 
-	// 1. Fetch transcript from Recall
-	log.Printf("[TranscriptEvent] Fetching transcript for recording %s (bot %s)...", recordingID, botID)
-	transcript, err := p.Recall.GetTranscript(recordingID)
+	log.Printf("[TranscriptEvent] Fetching transcript for ID %s (bot %s)...", transcriptID, botID)
+	transcript, err := p.Recall.GetTranscript(transcriptID)
 	if err != nil {
-		return fmt.Errorf("failed to fetch transcript for recording %s: %w", recordingID, err)
+		return fmt.Errorf("failed to fetch transcript for ID %s: %w", transcriptID, err)
 	}
-	log.Printf("[TranscriptEvent] Successfully fetched %d transcript elements for recording %s", len(transcript), recordingID)
+	log.Printf("[TranscriptEvent] Successfully fetched %d transcript elements for bot %s", len(transcript), botID)
 
 	// 2. Persist transcript to Firestore
 	if err := p.BotRepo.SaveTranscript(ctx, botID, transcript); err != nil {
 		return fmt.Errorf("failed to save transcript: %w", err)
 	}
 
-	// 3. Archive recording to GCS in background
+	// 3. Update status to recorded to indicate transcript is ready (synced with processing_status)
+	if err := p.BotRepo.UpdateBotStatusAndSubCode(ctx, botID, "recorded", ""); err != nil {
+		log.Printf("Failed to update status to recorded for bot %s: %v", botID, err)
+	}
+
+	// 4. Archive recording to GCS in background
 	go p.ArchiveToGCS(botID)
 
 	return nil
@@ -76,24 +83,37 @@ func (p *TranscriptEventProcessor) ArchiveToGCS(botID string) {
 	}
 
 	// 2. Get bot from Recall to get fresh download URL
-	bot, err := p.Recall.GetBot(botID)
-	if err != nil {
-		log.Printf("Archive failed: could not get bot %s from Recall: %v", botID, err)
-		return
+	var downloadURL string
+	var bot *BotResponse
+
+	// Retry logic: video mixed might take a few seconds after transcript.done
+	for i := 0; i < 5; i++ {
+		bot, err = p.Recall.GetBot(botID)
+		if err != nil {
+			log.Printf("Archive attempt %d: could not get bot %s from Recall: %v", i+1, botID, err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		if len(bot.Recordings) > 0 {
+			downloadURL = bot.Recordings[0].MediaShortcuts.VideoMixed.Data.DownloadURL
+			if downloadURL != "" {
+				break
+			}
+		}
+
+		log.Printf("Archive attempt %d: no download URL yet for bot %s, waiting...", i+1, botID)
+		time.Sleep(5 * time.Second)
 	}
 
-	if len(bot.Recordings) == 0 {
-		return
-	}
-
-	downloadURL := bot.Recordings[0].MediaShortcuts.VideoMixed.URL
 	if downloadURL == "" {
-		log.Printf("Archive failed: no download URL for bot %s", botID)
+		log.Printf("Archive failed: no download URL for bot %s after retries", botID)
 		return
 	}
 
 	// 3. Upload to GCS
 	objectName := p.Storage.GetPath(uid, botID)
+	log.Printf("[Archive] Uploading media for bot %s to GCS: %s", botID, objectName)
 	_, err = p.Storage.UploadFromURL(context.Background(), downloadURL, objectName)
 	if err != nil {
 		log.Printf("Archive failed: GCS upload error for bot %s: %v", botID, err)

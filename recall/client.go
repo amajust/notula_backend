@@ -246,10 +246,11 @@ func (c *Client) postBot(payload CreateBotRequest) (*events.BotResponse, error) 
 	return &bot, nil
 }
 
-// GetTranscript fetches the completed transcript for a recording.
-func (c *Client) GetTranscript(recordingID string) ([]events.TranscriptElement, error) {
-	url := fmt.Sprintf("%s/recording/%s/transcript/", c.baseURL, recordingID)
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+// GetTranscript fetches the completed transcript using the modern 2-step flow.
+func (c *Client) GetTranscript(transcriptID string) ([]events.TranscriptElement, error) {
+	// Step 1: Fetch transcript metadata to get the download URL
+	metaURL := fmt.Sprintf("%s/transcript/%s/", c.baseURL, transcriptID)
+	req, err := http.NewRequest(http.MethodGet, metaURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -262,13 +263,40 @@ func (c *Client) GetTranscript(recordingID string) ([]events.TranscriptElement, 
 	defer resp.Body.Close()
 
 	if err := c.checkStatus(resp); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch transcript metadata: %w", err)
+	}
+
+	var meta struct {
+		Data struct {
+			DownloadURL string `json:"download_url"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&meta); err != nil {
+		return nil, fmt.Errorf("failed to decode transcript metadata: %w", err)
+	}
+
+	downloadURL := meta.Data.DownloadURL
+	if downloadURL == "" {
+		return nil, fmt.Errorf("no download URL found in transcript metadata")
+	}
+
+	// Step 2: Download the actual JSON transcript from the download URL
+	log.Printf("[RecallClient] Downloading transcript from %s", downloadURL)
+	transResp, err := http.Get(downloadURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download transcript from URL: %w", err)
+	}
+	defer transResp.Body.Close()
+
+	if transResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download URL returned status %d", transResp.StatusCode)
 	}
 
 	var transcript []events.TranscriptElement
-	if err := json.NewDecoder(resp.Body).Decode(&transcript); err != nil {
-		return nil, err
+	if err := json.NewDecoder(transResp.Body).Decode(&transcript); err != nil {
+		return nil, fmt.Errorf("failed to decode transcript JSON: %w", err)
 	}
+
 	return transcript, nil
 }
 

@@ -51,8 +51,8 @@ func (p *RecordingEventProcessor) HandleBotDone(ctx context.Context, botID strin
 		return
 	}
 
-	// 2. Update status in repository
-	if err := p.BotRepo.UpdateBotStatus(ctx, botID, "recorded"); err != nil {
+	// 2. Update status in repository to indicate media is ready
+	if err := p.BotRepo.UpdateBotStatus(ctx, botID, "recording_done"); err != nil {
 		log.Printf("Failed to update bot %s status: %v", botID, err)
 	}
 }

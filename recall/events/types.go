@@ -8,7 +8,9 @@ type BotResponse struct {
 		DurationSeconds int    `json:"duration_seconds"`
 		MediaShortcuts  struct {
 			VideoMixed struct {
-				URL string `json:"url"`
+				Data struct {
+					DownloadURL string `json:"download_url"`
+				} `json:"data"`
 			} `json:"video_mixed"`
 		} `json:"media_shortcuts"`
 	} `json:"recordings"`

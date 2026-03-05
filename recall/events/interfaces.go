@@ -6,7 +6,7 @@ import (
 
 type RecallClient interface {
 	GetBot(botID string) (*BotResponse, error)
-	GetTranscript(recordingID string) ([]TranscriptElement, error)
+	GetTranscript(transcriptID string) ([]TranscriptElement, error)
 	SendChatMessage(botID string, text string) error
 	DeleteMedia(botID string) error
 }

@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"time"
 
+	"strings"
+
 	"cloud.google.com/go/storage"
 )
 
@@ -16,6 +18,9 @@ type GCSClient struct {
 }
 
 func NewGCSClient(ctx context.Context, bucketName string) (*GCSClient, error) {
+	// Strip gs:// prefix if present
+	bucketName = strings.TrimPrefix(bucketName, "gs://")
+
 	client, err := storage.NewClient(ctx)
 	if err != nil {
 		return nil, err

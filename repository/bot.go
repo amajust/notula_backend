@@ -71,8 +71,10 @@ func (r *FirestoreBotRepository) SaveBot(ctx context.Context, bot map[string]int
 }
 
 func (r *FirestoreBotRepository) UpdateBotStatus(ctx context.Context, botID string, status string) error {
+	processingStatus := utils.GetFriendlyProcessingStatus(status)
 	_, err := r.client.Collection("recordings").Doc(botID).Update(ctx, []firestore.Update{
 		{Path: "status", Value: status},
+		{Path: "processing_status", Value: processingStatus},
 	})
 	return err
 }
@@ -99,7 +101,6 @@ func (r *FirestoreBotRepository) UpdateBotStatusAndSubCode(ctx context.Context, 
 func (r *FirestoreBotRepository) SaveTranscript(ctx context.Context, botID string, transcript interface{}) error {
 	_, err := r.client.Collection("recordings").Doc(botID).Update(ctx, []firestore.Update{
 		{Path: "transcript", Value: transcript},
-		{Path: "status", Value: "completed"},
 	})
 	return err
 }
