@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 
+	"notulapro-backend/utils"
+
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
 )
@@ -72,6 +74,25 @@ func (r *FirestoreBotRepository) UpdateBotStatus(ctx context.Context, botID stri
 	_, err := r.client.Collection("recordings").Doc(botID).Update(ctx, []firestore.Update{
 		{Path: "status", Value: status},
 	})
+	return err
+}
+
+func (r *FirestoreBotRepository) UpdateBotStatusAndSubCode(ctx context.Context, botID string, status string, subCode string) error {
+	processingStatus := utils.GetFriendlyProcessingStatus(status)
+	if (status == "failed" || status == "call_ended" || status == "fatal") && subCode != "" {
+		processingStatus = utils.GetFriendlyRecallMessage(subCode)
+	}
+
+	data := make(map[string]interface{})
+	data["status"] = status
+	if subCode != "" {
+		data["sub_code"] = subCode
+	}
+	if processingStatus != "" {
+		data["processing_status"] = processingStatus
+	}
+
+	_, err := r.client.Collection("recordings").Doc(botID).Set(ctx, data, firestore.MergeAll)
 	return err
 }
 

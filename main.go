@@ -18,6 +18,8 @@ import (
 	"notulapro-backend/handlers"
 	"notulapro-backend/middleware"
 	"notulapro-backend/recall"
+	"notulapro-backend/recall/events"
+	recallhandlers "notulapro-backend/recall/handlers"
 	"notulapro-backend/repository"
 	"notulapro-backend/storage"
 )
@@ -115,6 +117,19 @@ func main() {
 	// ─── Handlers ───
 	botHandler := handlers.NewBotHandler(recallClient, botRepo, gcsClient)
 	recordingHandler := handlers.NewRecordingHandler(recordingRepo, gladiaClient, firebaseStorageClient)
+
+	// ─── Recall Webhook System (Granular) ───
+	botEventProc := events.NewBotEventProcessor(botRepo)
+	recEventProc := events.NewRecordingEventProcessor(botRepo, recallClient)
+	transcriptEventProc := events.NewTranscriptEventProcessor(botRepo, recallClient, gcsClient)
+	realtimeEventProc := events.NewRealtimeEventProcessor(recallClient)
+
+	recallBotHandler := recallhandlers.NewBotHandler(botEventProc)
+	recallRecHandler := recallhandlers.NewRecordingHandler(recEventProc)
+	recallTranscriptHandler := recallhandlers.NewTranscriptHandler(transcriptEventProc)
+	recallRealtimeHandler := recallhandlers.NewRealtimeHandler(realtimeEventProc)
+
+	// Use old webhookHandler only for Gladia if needed
 	webhookHandler := handlers.NewWebhookHandler(recallClient, botRepo, recordingRepo, gcsClient, gladiaClient)
 
 	// ─── Recovery: Check for stuck recordings on startup ───
@@ -130,8 +145,11 @@ func main() {
 	}()
 
 	// Webhooks (must be defined BEFORE the /api/v1 auth group to bypass middleware)
-	app.Post("/api/v1/webhook/recall", middleware.RecallWebhookAuth(), webhookHandler.RecallWebhook)
-	app.Post("/api/v1/webhook/recall/realtime", middleware.RecallWebhookAuth(), webhookHandler.RecallRealtimeWebhook)
+	webhook := app.Group("/api/v1/webhook/recall", middleware.RecallWebhookAuth())
+	webhook.Post("/bot", recallBotHandler.Handle)
+	webhook.Post("/recording", recallRecHandler.Handle)
+	webhook.Post("/transcript", recallTranscriptHandler.Handle)
+	webhook.Post("/realtime", recallRealtimeHandler.Handle)
 	app.Post("/api/v1/webhook/gladia", webhookHandler.GladiaWebhook)
 
 	api := app.Group("/api/v1", middleware.FirebaseAuth(authClient))

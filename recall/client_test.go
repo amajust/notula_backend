@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"notulapro-backend/recall/events"
 )
 
 // setupMockServer creates a mock HTTP server that returns the given status code and response body.
@@ -35,7 +37,7 @@ func setupMockServer(statusCode int, responseBody interface{}) (*httptest.Server
 
 func TestClient_CreateBot(t *testing.T) {
 	expectedBotID := "bot-123"
-	mockResponse := BotResponse{
+	mockResponse := events.BotResponse{
 		ID: expectedBotID,
 	}
 
@@ -56,7 +58,7 @@ func TestClient_CreateBot(t *testing.T) {
 
 func TestClient_GetBot(t *testing.T) {
 	expectedBotID := "bot-456"
-	mockResponse := BotResponse{
+	mockResponse := events.BotResponse{
 		ID: expectedBotID,
 	}
 

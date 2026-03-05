@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"context"
-	"notulapro-backend/recall"
+	"notulapro-backend/recall/events"
 	"notulapro-backend/storage"
 	"notulapro-backend/utils"
 	"time"
@@ -12,11 +12,11 @@ import (
 
 // RecallClient defines the interface for interacting with Recall.ai.
 type RecallClient interface {
-	CreateBot(meetingURL string, botName string, joinAt *time.Time) (*recall.BotResponse, error)
-	GetBot(botID string) (*recall.BotResponse, error)
+	CreateBot(meetingURL string, botName string, joinAt *time.Time) (*events.BotResponse, error)
+	GetBot(botID string) (*events.BotResponse, error)
 	LeaveBot(botID string) error
 	StartAsyncTranscription(recordingID string) error
-	GetTranscript(botID string) ([]recall.TranscriptElement, error)
+	GetTranscript(botID string) ([]events.TranscriptElement, error)
 	DeleteMedia(botID string) error
 	SendChatMessage(botID string, text string) error
 }
@@ -28,6 +28,7 @@ type BotRepository interface {
 	GetBotByID(ctx context.Context, botID string) (map[string]interface{}, error)
 	SaveBot(ctx context.Context, bot map[string]interface{}) error
 	UpdateBotStatus(ctx context.Context, botID string, status string) error
+	UpdateBotStatusAndSubCode(ctx context.Context, botID string, status string, subCode string) error
 	SaveTranscript(ctx context.Context, botID string, transcript interface{}) error
 }
 
@@ -96,14 +97,15 @@ func (h *BotHandler) SendBot(c *fiber.Ctx) error {
 
 	// Save the new bot to Firestore for tracking and deduplication
 	err = h.repo.SaveBot(c.Context(), map[string]interface{}{
-		"id":          bot.ID,
-		"uid":         uid, // Tie the bot to the person who requested it
-		"meeting_url": body.MeetingURL,
-		"status":      "joining",
-		"type":        "virtual",
-		"title":       "Virtual Meeting " + time.Now().Format("2006-01-02 15:04"),
-		"tags":        []string{"Meeting"},
-		"createdAt":   time.Now(),
+		"id":                bot.ID,
+		"uid":               uid, // Tie the bot to the person who requested it
+		"meeting_url":       body.MeetingURL,
+		"status":            "joining",
+		"processing_status": "Bot is connecting...",
+		"type":              "virtual",
+		"title":             "Virtual Meeting " + time.Now().Format("2006-01-02 15:04"),
+		"tags":              []string{"Meeting"},
+		"createdAt":         time.Now(),
 	})
 
 	if err != nil {
@@ -163,15 +165,16 @@ func (h *BotHandler) ScheduleBot(c *fiber.Ctx) error {
 
 	// Save scheduled bot to Firestore
 	err = h.repo.SaveBot(c.Context(), map[string]interface{}{
-		"id":          bot.ID,
-		"uid":         uid,
-		"meeting_url": body.MeetingURL,
-		"status":      "scheduled",
-		"type":        "virtual",
-		"title":       "Scheduled: " + body.MeetingURL,
-		"tags":        []string{"Scheduled"},
-		"createdAt":   time.Now(),
-		"join_at":     body.JoinAt,
+		"id":                bot.ID,
+		"uid":               uid,
+		"meeting_url":       body.MeetingURL,
+		"status":            "scheduled",
+		"processing_status": "Scheduled",
+		"type":              "virtual",
+		"title":             "Scheduled: " + body.MeetingURL,
+		"tags":              []string{"Scheduled"},
+		"createdAt":         time.Now(),
+		"join_at":           body.JoinAt,
 	})
 
 	if err != nil {

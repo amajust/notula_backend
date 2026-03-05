@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"notulapro-backend/recall"
+	"notulapro-backend/recall/events"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -17,19 +17,19 @@ import (
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
 type mockRecallClient struct {
-	createBotFunc               func(meetingURL string, botName string, joinAt *time.Time) (*recall.BotResponse, error)
-	getBotFunc                  func(botID string) (*recall.BotResponse, error)
+	createBotFunc               func(meetingURL string, botName string, joinAt *time.Time) (*events.BotResponse, error)
+	getBotFunc                  func(botID string) (*events.BotResponse, error)
 	leaveBotFunc                func(botID string) error
 	startAsyncTranscriptionFunc func(recordingID string) error
-	getTranscriptFunc           func(botID string) ([]recall.TranscriptElement, error)
+	getTranscriptFunc           func(botID string) ([]events.TranscriptElement, error)
 	deleteMediaFunc             func(botID string) error
 	sendChatMessageFunc         func(botID string, text string) error
 }
 
-func (m *mockRecallClient) CreateBot(meetingURL string, botName string, joinAt *time.Time) (*recall.BotResponse, error) {
+func (m *mockRecallClient) CreateBot(meetingURL string, botName string, joinAt *time.Time) (*events.BotResponse, error) {
 	return m.createBotFunc(meetingURL, botName, joinAt)
 }
-func (m *mockRecallClient) GetBot(botID string) (*recall.BotResponse, error) {
+func (m *mockRecallClient) GetBot(botID string) (*events.BotResponse, error) {
 	return m.getBotFunc(botID)
 }
 func (m *mockRecallClient) LeaveBot(botID string) error {
@@ -38,7 +38,7 @@ func (m *mockRecallClient) LeaveBot(botID string) error {
 func (m *mockRecallClient) StartAsyncTranscription(recordingID string) error {
 	return m.startAsyncTranscriptionFunc(recordingID)
 }
-func (m *mockRecallClient) GetTranscript(botID string) ([]recall.TranscriptElement, error) {
+func (m *mockRecallClient) GetTranscript(botID string) ([]events.TranscriptElement, error) {
 	return m.getTranscriptFunc(botID)
 }
 func (m *mockRecallClient) DeleteMedia(botID string) error {
@@ -49,12 +49,13 @@ func (m *mockRecallClient) SendChatMessage(botID string, text string) error {
 }
 
 type mockBotRepository struct {
-	getActiveBotFunc    func(ctx context.Context, meetingURL string) (string, error)
-	getScheduledBotFunc func(ctx context.Context, meetingURL string) (string, error)
-	saveBotFunc         func(ctx context.Context, bot map[string]interface{}) error
-	getBotByIDFunc      func(ctx context.Context, botID string) (map[string]interface{}, error)
-	updateBotStatusFunc func(ctx context.Context, botID string, status string) error
-	saveTranscriptFunc  func(ctx context.Context, botID string, transcript interface{}) error
+	getActiveBotFunc              func(ctx context.Context, meetingURL string) (string, error)
+	getScheduledBotFunc           func(ctx context.Context, meetingURL string) (string, error)
+	saveBotFunc                   func(ctx context.Context, bot map[string]interface{}) error
+	getBotByIDFunc                func(ctx context.Context, botID string) (map[string]interface{}, error)
+	updateBotStatusFunc           func(ctx context.Context, botID string, status string) error
+	updateBotStatusAndSubCodeFunc func(ctx context.Context, botID string, status string, subCode string) error
+	saveTranscriptFunc            func(ctx context.Context, botID string, transcript interface{}) error
 }
 
 func (m *mockBotRepository) GetActiveBotByMeetingURL(ctx context.Context, meetingURL string) (string, error) {
@@ -72,6 +73,12 @@ func (m *mockBotRepository) GetBotByID(ctx context.Context, botID string) (map[s
 func (m *mockBotRepository) UpdateBotStatus(ctx context.Context, botID string, status string) error {
 	return m.updateBotStatusFunc(ctx, botID, status)
 }
+func (m *mockBotRepository) UpdateBotStatusAndSubCode(ctx context.Context, botID string, status string, subCode string) error {
+	if m.updateBotStatusAndSubCodeFunc != nil {
+		return m.updateBotStatusAndSubCodeFunc(ctx, botID, status, subCode)
+	}
+	return nil
+}
 func (m *mockBotRepository) SaveTranscript(ctx context.Context, botID string, transcript interface{}) error {
 	return m.saveTranscriptFunc(ctx, botID, transcript)
 }
@@ -82,8 +89,8 @@ func TestBotHandler_SendBot_Success(t *testing.T) {
 	app := fiber.New()
 
 	mockRecall := &mockRecallClient{
-		createBotFunc: func(meetingURL string, botName string, joinAt *time.Time) (*recall.BotResponse, error) {
-			return &recall.BotResponse{ID: "bot-123"}, nil
+		createBotFunc: func(meetingURL string, botName string, joinAt *time.Time) (*events.BotResponse, error) {
+			return &events.BotResponse{ID: "bot-123"}, nil
 		},
 	}
 
@@ -148,8 +155,8 @@ func TestBotHandler_ScheduleBot_Success(t *testing.T) {
 	app := fiber.New()
 
 	mockRecall := &mockRecallClient{
-		createBotFunc: func(meetingURL string, botName string, joinAt *time.Time) (*recall.BotResponse, error) {
-			return &recall.BotResponse{ID: "bot-scheduled"}, nil
+		createBotFunc: func(meetingURL string, botName string, joinAt *time.Time) (*events.BotResponse, error) {
+			return &events.BotResponse{ID: "bot-scheduled"}, nil
 		},
 	}
 
@@ -212,8 +219,8 @@ func TestBotHandler_ScheduleBot_TooSoon(t *testing.T) {
 func TestBotHandler_GetBotStatus(t *testing.T) {
 	app := fiber.New()
 	mockRecall := &mockRecallClient{
-		getBotFunc: func(botID string) (*recall.BotResponse, error) {
-			return &recall.BotResponse{ID: botID}, nil
+		getBotFunc: func(botID string) (*events.BotResponse, error) {
+			return &events.BotResponse{ID: botID}, nil
 		},
 	}
 	handler := NewBotHandler(mockRecall, nil, nil)

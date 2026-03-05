@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"notulapro-backend/recall/events"
 )
 
 // Client is a thin wrapper around the Recall.ai REST API.
@@ -41,19 +43,8 @@ type CreateBotRequest struct {
 	TranscriptionOptions map[string]interface{} `json:"transcription_options,omitempty"`
 }
 
-type BotResponse struct {
-	ID            string                   `json:"id"`
-	StatusChanges []map[string]interface{} `json:"status_changes"`
-	Recordings    []struct {
-		ID              string `json:"id"`
-		DurationSeconds int    `json:"duration_seconds"`
-		MediaShortcuts  struct {
-			VideoMixed struct {
-				URL string `json:"url"`
-			} `json:"video_mixed"`
-		} `json:"media_shortcuts"`
-	} `json:"recordings"`
-}
+// BotResponse is now in recall/events/types.go
+// Transcription types are now in recall/events/types.go
 
 type CreateTranscriptRequest struct {
 	Provider    map[string]interface{} `json:"provider"`
@@ -66,17 +57,12 @@ type TranscriptResponse struct {
 	Summary string `json:"summary"`
 }
 
-type TranscriptElement struct {
-	Speaker string  `json:"speaker"`
-	Text    string  `json:"text"`
-	Start   float64 `json:"start"`
-	End     float64 `json:"end"`
-}
+// TranscriptElement is now in recall/events/types.go
 
 // ─── Bot methods ─────────────────────────────────────────────────────────────
 
 // CreateBot sends or schedules Notbot for a meeting.
-func (c *Client) CreateBot(meetingURL string, botName string, joinAt *time.Time) (*BotResponse, error) {
+func (c *Client) CreateBot(meetingURL string, botName string, joinAt *time.Time) (*events.BotResponse, error) {
 	if botName == "" {
 		botName = "Notbot"
 	}
@@ -86,7 +72,8 @@ func (c *Client) CreateBot(meetingURL string, botName string, joinAt *time.Time)
 	if baseURL == "" {
 		log.Printf("[WARNING] BASE_URL env var is missing, Webhook URL will be invalid!")
 	}
-	webhookURL := baseURL + "/api/v1/webhook/recall/realtime"
+	realtimeURL := baseURL + "/api/v1/webhook/recall/realtime"
+
 	recordingConfig := map[string]interface{}{
 		"transcript": map[string]interface{}{
 			"provider": map[string]interface{}{
@@ -96,7 +83,7 @@ func (c *Client) CreateBot(meetingURL string, botName string, joinAt *time.Time)
 		"realtime_endpoints": []map[string]interface{}{
 			{
 				"type": "webhook",
-				"url":  webhookURL,
+				"url":  realtimeURL,
 				"events": []string{
 					"transcript.data",
 				},
@@ -114,7 +101,7 @@ func (c *Client) CreateBot(meetingURL string, botName string, joinAt *time.Time)
 }
 
 // GetBot fetches the current status of a bot.
-func (c *Client) GetBot(botID string) (*BotResponse, error) {
+func (c *Client) GetBot(botID string) (*events.BotResponse, error) {
 	url := fmt.Sprintf("%s/bot/%s/", c.baseURL, botID)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -132,7 +119,7 @@ func (c *Client) GetBot(botID string) (*BotResponse, error) {
 		return nil, err
 	}
 
-	var bot BotResponse
+	var bot events.BotResponse
 	if err := json.NewDecoder(resp.Body).Decode(&bot); err != nil {
 		return nil, err
 	}
@@ -230,7 +217,7 @@ func (c *Client) StartAsyncTranscription(recordingID string) error {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-func (c *Client) postBot(payload CreateBotRequest) (*BotResponse, error) {
+func (c *Client) postBot(payload CreateBotRequest) (*events.BotResponse, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -252,7 +239,7 @@ func (c *Client) postBot(payload CreateBotRequest) (*BotResponse, error) {
 		return nil, err
 	}
 
-	var bot BotResponse
+	var bot events.BotResponse
 	if err := json.NewDecoder(resp.Body).Decode(&bot); err != nil {
 		return nil, err
 	}
@@ -260,8 +247,8 @@ func (c *Client) postBot(payload CreateBotRequest) (*BotResponse, error) {
 }
 
 // GetTranscript fetches the completed transcript for a recording.
-func (c *Client) GetTranscript(botID string) ([]TranscriptElement, error) {
-	url := fmt.Sprintf("%s/bot/%s/transcript/", c.baseURL, botID)
+func (c *Client) GetTranscript(recordingID string) ([]events.TranscriptElement, error) {
+	url := fmt.Sprintf("%s/recording/%s/transcript/", c.baseURL, recordingID)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -278,7 +265,7 @@ func (c *Client) GetTranscript(botID string) ([]TranscriptElement, error) {
 		return nil, err
 	}
 
-	var transcript []TranscriptElement
+	var transcript []events.TranscriptElement
 	if err := json.NewDecoder(resp.Body).Decode(&transcript); err != nil {
 		return nil, err
 	}
