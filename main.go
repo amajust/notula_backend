@@ -129,12 +129,12 @@ func main() {
 		}
 	}()
 
-	api := app.Group("/api/v1", middleware.FirebaseAuth(authClient))
-
-	// Webhooks (usually unauthenticated or secret-based, but grouping under /api for now)
-	app.Post("/api/v1/webhook/recall", webhookHandler.RecallWebhook)
-	app.Post("/api/v1/webhook/recall/realtime", webhookHandler.RecallRealtimeWebhook)
+	// Webhooks (must be defined BEFORE the /api/v1 auth group to bypass middleware)
+	app.Post("/api/v1/webhook/recall", middleware.RecallWebhookAuth(), webhookHandler.RecallWebhook)
+	app.Post("/api/v1/webhook/recall/realtime", middleware.RecallWebhookAuth(), webhookHandler.RecallRealtimeWebhook)
 	app.Post("/api/v1/webhook/gladia", webhookHandler.GladiaWebhook)
+
+	api := app.Group("/api/v1", middleware.FirebaseAuth(authClient))
 
 	// Bot routes
 	api.Post("/bot/send", botHandler.SendBot)

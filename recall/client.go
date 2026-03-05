@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -81,11 +82,15 @@ func (c *Client) CreateBot(meetingURL string, botName string, joinAt *time.Time)
 	}
 
 	// Set up real-time transcription with Gladia
-	webhookURL := os.Getenv("BASE_URL") + "/api/v1/webhook/recall/realtime"
+	baseURL := os.Getenv("BASE_URL")
+	if baseURL == "" {
+		log.Printf("[WARNING] BASE_URL env var is missing, Webhook URL will be invalid!")
+	}
+	webhookURL := baseURL + "/api/v1/webhook/recall/realtime"
 	recordingConfig := map[string]interface{}{
 		"transcript": map[string]interface{}{
 			"provider": map[string]interface{}{
-				"gladia": map[string]interface{}{},
+				"gladia_v2_streaming": map[string]interface{}{},
 			},
 		},
 		"realtime_endpoints": []map[string]interface{}{
