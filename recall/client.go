@@ -36,6 +36,7 @@ type CreateBotRequest struct {
 	MeetingURL           string                 `json:"meeting_url"`
 	BotName              string                 `json:"bot_name"`
 	JoinAt               *time.Time             `json:"join_at,omitempty"`
+	RecordingConfig      map[string]interface{} `json:"recording_config,omitempty"`
 	TranscriptionOptions map[string]interface{} `json:"transcription_options,omitempty"`
 }
 
@@ -79,10 +80,30 @@ func (c *Client) CreateBot(meetingURL string, botName string, joinAt *time.Time)
 		botName = "Notbot"
 	}
 
+	// Set up real-time transcription with Gladia
+	webhookURL := os.Getenv("BASE_URL") + "/api/v1/webhook/recall/realtime"
+	recordingConfig := map[string]interface{}{
+		"transcript": map[string]interface{}{
+			"provider": map[string]interface{}{
+				"gladia": map[string]interface{}{},
+			},
+		},
+		"realtime_endpoints": []map[string]interface{}{
+			{
+				"type": "webhook",
+				"url":  webhookURL,
+				"events": []string{
+					"transcript.data",
+				},
+			},
+		},
+	}
+
 	req := CreateBotRequest{
-		MeetingURL: meetingURL,
-		BotName:    botName,
-		JoinAt:     joinAt,
+		MeetingURL:      meetingURL,
+		BotName:         botName,
+		JoinAt:          joinAt,
+		RecordingConfig: recordingConfig,
 	}
 	return c.postBot(req)
 }
@@ -127,6 +148,33 @@ func (c *Client) GetBot(botID string) (*BotResponse, error) {
 func (c *Client) LeaveBot(botID string) error {
 	url := fmt.Sprintf("%s/bot/%s/leave_call/", c.baseURL, botID)
 	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	c.setHeaders(req)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return c.checkStatus(resp)
+}
+
+// SendChatMessage sends a message to the meeting chat via the bot.
+func (c *Client) SendChatMessage(botID string, text string) error {
+	url := fmt.Sprintf("%s/bot/%s/send_chat_message/", c.baseURL, botID)
+
+	payload := map[string]string{
+		"message": text,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
 	if err != nil {
 		return err
 	}

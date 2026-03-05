@@ -39,7 +39,7 @@ To measure the impact of Notula Pro, the platform must achieve the following KPI
 
 ### 4.2. Post-Meeting Intelligence Workflow
 
-- **Automated Ingest**: Webhooks trigger immediate transcription upon meeting termination.
+- **Real-Time Ingest**: Bot injects live transcripts directly into meeting chats and Recall triggers webhook downloads upon termination.
 - **Hybrid Storage Strategy**:
   - **Firestore**: Searchable text index & metadata.
   - **GCS (Vault)**: Permanent, private storage of high-resolution media.
@@ -57,13 +57,12 @@ To measure the impact of Notula Pro, the platform must achieve the following KPI
 ### In-Scope (V1)
 
 - Core Fiber Backend with Firestore Integration.
-- Recall.ai Bot Lifecycle & Webhook Automation. [IMPLEMENTED]
+- Recall.ai Bot Lifecycle, Real-Time Webhook Transcription & Meeting Chat Integration. [IMPLEMENTED]
 - Gladia V2 Offline Upload Integration.
 - Hybrid GCS Archiving & Signed URL Retrieval.
 
 ### Out-of-Scope (V1)
 
-- Real-time live transcription (Roadmap V2).
 - Native Mobile iOS/Android Recording App (Roadmap V2).
 - Automatic Calendar Sync (Outlook/Google) — (Scheduled for V1.1).
 

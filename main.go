@@ -133,6 +133,7 @@ func main() {
 
 	// Webhooks (usually unauthenticated or secret-based, but grouping under /api for now)
 	app.Post("/api/v1/webhook/recall", webhookHandler.RecallWebhook)
+	app.Post("/api/v1/webhook/recall/realtime", webhookHandler.RecallRealtimeWebhook)
 	app.Post("/api/v1/webhook/gladia", webhookHandler.GladiaWebhook)
 
 	// Bot routes

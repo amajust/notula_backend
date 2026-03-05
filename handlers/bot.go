@@ -18,6 +18,7 @@ type RecallClient interface {
 	StartAsyncTranscription(recordingID string) error
 	GetTranscript(botID string) ([]recall.TranscriptElement, error)
 	DeleteMedia(botID string) error
+	SendChatMessage(botID string, text string) error
 }
 
 // BotRepository defines the interface for persisting bot data.

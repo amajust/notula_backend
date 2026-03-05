@@ -23,6 +23,7 @@ type mockRecallClient struct {
 	startAsyncTranscriptionFunc func(recordingID string) error
 	getTranscriptFunc           func(botID string) ([]recall.TranscriptElement, error)
 	deleteMediaFunc             func(botID string) error
+	sendChatMessageFunc         func(botID string, text string) error
 }
 
 func (m *mockRecallClient) CreateBot(meetingURL string, botName string, joinAt *time.Time) (*recall.BotResponse, error) {
@@ -42,6 +43,9 @@ func (m *mockRecallClient) GetTranscript(botID string) ([]recall.TranscriptEleme
 }
 func (m *mockRecallClient) DeleteMedia(botID string) error {
 	return m.deleteMediaFunc(botID)
+}
+func (m *mockRecallClient) SendChatMessage(botID string, text string) error {
+	return m.sendChatMessageFunc(botID, text)
 }
 
 type mockBotRepository struct {
