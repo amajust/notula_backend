@@ -121,6 +121,7 @@ func main() {
 	// ─── Handlers ───
 	botHandler := handlers.NewBotHandler(recallClient, botRepo, gcsClient)
 	recordingHandler := handlers.NewRecordingHandler(recordingRepo, gladiaClient, firebaseStorageClient)
+	userHandler := handlers.NewUserHandler(gcsClient, firebaseStorageClient)
 
 	// ─── Recall Webhook System (Granular) ───
 	botEventProc := events.NewBotEventProcessor(botRepo)
@@ -162,7 +163,12 @@ func main() {
 	api.Post("/bot/send", botHandler.SendBot)
 	api.Post("/bot/schedule", botHandler.ScheduleBot)
 	api.Get("/bot/:id", botHandler.GetBotStatus)
+	api.Get("/bot/:id/transcript", botHandler.GetBotTranscript)
 	api.Post("/bot/:id/leave", botHandler.LeaveBot)
+	api.Delete("/bot/:id", botHandler.DeleteBot)
+
+	// User routes
+	api.Get("/user/storage", userHandler.GetStorageUsage)
 
 	// Recording routes
 	api.Get("/recording/:id/url", botHandler.GetRecordingURL)

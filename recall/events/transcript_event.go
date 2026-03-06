@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -18,8 +19,8 @@ func NewTranscriptEventProcessor(br BotRepository, r RecallClient, s GCSClient) 
 	return &TranscriptEventProcessor{BotRepo: br, Recall: r, Storage: s}
 }
 
-func (p *TranscriptEventProcessor) Process(ctx context.Context, event string, botID string, recordingID string, transcriptID string) error {
-	log.Printf("[TranscriptEvent] Processing %s for bot %s (recording %s, transcript %s)", event, botID, recordingID, transcriptID)
+func (p *TranscriptEventProcessor) Process(ctx context.Context, event string, botID string, recordingID string, transcriptID string, reason string) error {
+	log.Printf("[TranscriptEvent] Processing %s for bot %s (recording %s, transcript %s, reason %s)", event, botID, recordingID, transcriptID, reason)
 
 	if event != "transcript.done" {
 		// Sync the status to Firestore for lifecycle visibility
@@ -27,7 +28,7 @@ func (p *TranscriptEventProcessor) Process(ctx context.Context, event string, bo
 		if strings.HasPrefix(event, "transcript.") {
 			statusCode = strings.TrimPrefix(event, "transcript.")
 		}
-		return p.BotRepo.UpdateBotStatusAndSubCode(ctx, botID, statusCode, "")
+		return p.BotRepo.UpdateBotStatusAndSubCode(ctx, botID, statusCode, reason)
 	}
 
 	if recordingID == "" {
@@ -133,10 +134,19 @@ func (p *TranscriptEventProcessor) ArchiveToGCS(botID string) {
 		"duration":   fmt.Sprintf("%d", durationSec),
 	})
 
-	// 5. Cleanup Recall Media
-	if err := p.Recall.DeleteMedia(botID); err != nil {
-		log.Printf("Cleanup failed: could not delete Recall media for bot %s: %v", botID, err)
-	} else {
-		log.Printf("Cleaned up Recall media for bot %s", botID)
+	// 5. Archive Transcript to GCS as well
+	log.Printf("[Archive] Archiving transcript for bot %s to GCS...", botID)
+	transcript, err := p.BotRepo.GetBotByID(context.Background(), botID)
+	if err == nil {
+		if transcriptList, ok := transcript["transcript"]; ok && transcriptList != nil {
+			transcriptJSON, _ := json.Marshal(transcriptList)
+			transcriptPath := p.Storage.GetTranscriptPath(uid, botID)
+			_, err = p.Storage.UploadData(context.Background(), transcriptJSON, transcriptPath)
+			if err != nil {
+				log.Printf("Archive warning: transcript GCS upload error for bot %s: %v", botID, err)
+			} else {
+				log.Printf("[Archive] Transcript archived to GCS for bot %s", botID)
+			}
+		}
 	}
 }

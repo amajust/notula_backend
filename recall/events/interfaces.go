@@ -9,6 +9,7 @@ type RecallClient interface {
 	GetTranscript(transcriptID string) ([]TranscriptElement, error)
 	SendChatMessage(botID string, text string) error
 	DeleteMedia(botID string) error
+	StartAsyncTranscription(recordingID string) error
 }
 
 type BotRepository interface {
@@ -25,5 +26,7 @@ type RecordingRepository interface {
 
 type GCSClient interface {
 	GetPath(uid string, botID string) string
+	GetTranscriptPath(uid string, botID string) string
 	UploadFromURL(ctx context.Context, url string, objectName string) (string, error)
+	UploadData(ctx context.Context, data []byte, objectName string) (string, error)
 }

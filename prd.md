@@ -11,6 +11,7 @@ To measure the impact of Notula Pro, the platform must achieve the following KPI
 - **Transcription Latency**: 1 hour of meeting audio processed and synced within < 2 minutes.
 - **Search Retrieval Time**: Full-text search across 100+ transcripts in < 500ms.
 - **Cost Efficiency**: Long-term storage cost per user maintained at < $0.05/month via Hybrid GCS Archiving.
+- **Storage Quota**: Enforced 500MB cloud storage limit for free users. [IMPLEMENTED]
 - **Reliability**: 99.9% success rate for Bot joining and recording stability.
 
 ## 3. Targeted User Personas & Stories
@@ -57,9 +58,17 @@ To measure the impact of Notula Pro, the platform must achieve the following KPI
 ### In-Scope (V1)
 
 - Core Fiber Backend with Firestore Integration.
-- Recall.ai Bot Lifecycle, Real-Time Webhook Transcription & Meeting Chat Integration. [IMPLEMENTED]
-- Gladia V2 Offline Upload Integration.
-- Hybrid GCS Archiving & Signed URL Retrieval.
+- Recall.ai Bot Lifecycle, Real-Time Webhook Transcription & Meeting Chat Integration. [IMPLEMENTED - Granular Webhook System]
+- Gladia V2 Offline Upload Integration. [IMPLEMENTED]
+- Hybrid GCS Archiving & Signed URL Retrieval. [IMPLEMENTED - API v2 Modern Flow]
+
+### 6.2. Bot Management & Meeting Isolation [NEW]
+
+- **Constraint**: Only one active/scheduled bot is allowed per meeting URL to prevent duplicate recordings.
+- **Conflict Handling**: If a bot is already present, the API returns `409 Conflict` with the existing `bot_id`. The frontend uses this to redirect the user to the existing session.
+- **Cancellation**: Implemented `DELETE /api/v1/bot/:id` to allow users to cancel bots that are still connecting or in the lobby.
+- **Re-joining**: Terminal bots (Status: Left, Failed, Completed, Cancelled) are ignored by the isolation check, allowing users to re-summon a bot if a previous attempt ended.
+- **LifeCycle Controls**: New handlers for `Cancel` and `Leave` provide granular control over the bot's presence in the call.
 
 ### Out-of-Scope (V1)
 

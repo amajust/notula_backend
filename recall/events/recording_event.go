@@ -55,4 +55,10 @@ func (p *RecordingEventProcessor) HandleBotDone(ctx context.Context, botID strin
 	if err := p.BotRepo.UpdateBotStatus(ctx, botID, "recording_done"); err != nil {
 		log.Printf("Failed to update bot %s status: %v", botID, err)
 	}
+
+	// 3. Trigger Async Transcription
+	log.Printf("Starting async transcription for recording %s...", bot.Recordings[0].ID)
+	if err := p.Recall.StartAsyncTranscription(bot.Recordings[0].ID); err != nil {
+		log.Printf("Failed to start async transcription for bot %s: %v", botID, err)
+	}
 }

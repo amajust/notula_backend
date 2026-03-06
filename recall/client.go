@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"notulapro-backend/recall/events"
@@ -67,35 +68,10 @@ func (c *Client) CreateBot(meetingURL string, botName string, joinAt *time.Time)
 		botName = "Notbot"
 	}
 
-	// Set up real-time transcription with Gladia
-	baseURL := os.Getenv("BASE_URL")
-	if baseURL == "" {
-		log.Printf("[WARNING] BASE_URL env var is missing, Webhook URL will be invalid!")
-	}
-	realtimeURL := baseURL + "/api/v1/webhook/recall/realtime"
-
-	recordingConfig := map[string]interface{}{
-		"transcript": map[string]interface{}{
-			"provider": map[string]interface{}{
-				"gladia_v2_streaming": map[string]interface{}{},
-			},
-		},
-		"realtime_endpoints": []map[string]interface{}{
-			{
-				"type": "webhook",
-				"url":  realtimeURL,
-				"events": []string{
-					"transcript.data",
-				},
-			},
-		},
-	}
-
 	req := CreateBotRequest{
-		MeetingURL:      meetingURL,
-		BotName:         botName,
-		JoinAt:          joinAt,
-		RecordingConfig: recordingConfig,
+		MeetingURL: meetingURL,
+		BotName:    botName,
+		JoinAt:     joinAt,
 	}
 	return c.postBot(req)
 }
@@ -154,6 +130,24 @@ func (c *Client) LeaveBot(botID string) error {
 	return c.checkStatus(resp)
 }
 
+// DeleteBot deletes the bot entirely from Recall.ai.
+func (c *Client) DeleteBot(botID string) error {
+	url := fmt.Sprintf("%s/bot/%s/", c.baseURL, botID)
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return err
+	}
+	c.setHeaders(req)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return c.checkStatus(resp)
+}
+
 // SendChatMessage sends a message to the meeting chat via the bot.
 func (c *Client) SendChatMessage(botID string, text string) error {
 	url := fmt.Sprintf("%s/bot/%s/send_chat_message/", c.baseURL, botID)
@@ -187,10 +181,9 @@ func (c *Client) SendChatMessage(botID string, text string) error {
 func (c *Client) StartAsyncTranscription(recordingID string) error {
 	body := CreateTranscriptRequest{
 		Provider: map[string]interface{}{
-			"gladia": map[string]interface{}{},
-		},
-		Diarization: map[string]interface{}{
-			"use_separate_streams_when_available": true,
+			"gladia_v2_async": map[string]interface{}{
+				"diarization": true,
+			},
 		},
 	}
 
@@ -250,6 +243,7 @@ func (c *Client) postBot(payload CreateBotRequest) (*events.BotResponse, error) 
 func (c *Client) GetTranscript(transcriptID string) ([]events.TranscriptElement, error) {
 	// Step 1: Fetch transcript metadata to get the download URL
 	metaURL := fmt.Sprintf("%s/transcript/%s/", c.baseURL, transcriptID)
+	log.Printf("[RecallClient] GetTranscript: Fetching metadata for ID %s at %s", transcriptID, metaURL)
 	req, err := http.NewRequest(http.MethodGet, metaURL, nil)
 	if err != nil {
 		return nil, err
@@ -266,12 +260,18 @@ func (c *Client) GetTranscript(transcriptID string) ([]events.TranscriptElement,
 		return nil, fmt.Errorf("failed to fetch transcript metadata: %w", err)
 	}
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read transcript metadata body: %w", err)
+	}
+	log.Printf("[RecallClient] Transcript metadata response: %s", string(body))
+
 	var meta struct {
 		Data struct {
 			DownloadURL string `json:"download_url"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&meta); err != nil {
+	if err := json.Unmarshal(body, &meta); err != nil {
 		return nil, fmt.Errorf("failed to decode transcript metadata: %w", err)
 	}
 
@@ -292,9 +292,59 @@ func (c *Client) GetTranscript(transcriptID string) ([]events.TranscriptElement,
 		return nil, fmt.Errorf("download URL returned status %d", transResp.StatusCode)
 	}
 
-	var transcript []events.TranscriptElement
-	if err := json.NewDecoder(transResp.Body).Decode(&transcript); err != nil {
+	type recallWord struct {
+		Text           string `json:"text"`
+		StartTimestamp struct {
+			Relative float64 `json:"relative"`
+		} `json:"start_timestamp"`
+		EndTimestamp struct {
+			Relative float64 `json:"relative"`
+		} `json:"end_timestamp"`
+	}
+
+	type recallSegment struct {
+		Participant struct {
+			Name string `json:"name"`
+		} `json:"participant"`
+		Words []recallWord `json:"words"`
+	}
+
+	var segments []recallSegment
+	if err := json.NewDecoder(transResp.Body).Decode(&segments); err != nil {
 		return nil, fmt.Errorf("failed to decode transcript JSON: %w", err)
+	}
+
+	var transcript []events.TranscriptElement
+	for _, s := range segments {
+		if len(s.Words) == 0 {
+			continue
+		}
+
+		var textBuilder strings.Builder
+		for i, w := range s.Words {
+			if i > 0 {
+				textBuilder.WriteString(" ")
+			}
+			textBuilder.WriteString(w.Text)
+		}
+
+		speaker := s.Participant.Name
+		if speaker == "" {
+			speaker = "Unknown"
+		}
+
+		start := s.Words[0].StartTimestamp.Relative
+		minutes := int(start) / 60
+		seconds := int(start) % 60
+		timestamp := fmt.Sprintf("%02d:%02d", minutes, seconds)
+
+		transcript = append(transcript, events.TranscriptElement{
+			Speaker:   speaker,
+			Text:      textBuilder.String(),
+			Start:     start,
+			End:       s.Words[len(s.Words)-1].EndTimestamp.Relative,
+			Timestamp: timestamp,
+		})
 	}
 
 	return transcript, nil
@@ -329,5 +379,5 @@ func (c *Client) checkStatus(resp *http.Response) error {
 		return nil
 	}
 	body, _ := io.ReadAll(resp.Body)
-	return fmt.Errorf("recall.ai error %d: %s", resp.StatusCode, string(body))
+	return fmt.Errorf("recall_status:%d body:%s", resp.StatusCode, string(body))
 }

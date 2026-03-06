@@ -31,6 +31,7 @@ func (h *TranscriptHandler) Handle(c *fiber.Ctx) error {
 				ID string `json:"id"`
 			} `json:"transcript"`
 			RecordingID string `json:"recording_id"`
+			Reason      string `json:"reason"`
 		} `json:"data"`
 	}
 
@@ -45,9 +46,11 @@ func (h *TranscriptHandler) Handle(c *fiber.Ctx) error {
 	}
 	transcriptID := payload.Data.Transcript.ID
 
-	log.Printf("[TranscriptHandler] Received %s for bot %s (recording: %s, transcript: %s)", payload.Event, botID, recordingID, transcriptID)
+	reason := payload.Data.Reason
 
-	err := h.Processor.Process(context.Background(), payload.Event, botID, recordingID, transcriptID)
+	log.Printf("[TranscriptHandler] Received %s for bot %s (recording: %s, transcript: %s, reason: %s)", payload.Event, botID, recordingID, transcriptID, reason)
+
+	err := h.Processor.Process(context.Background(), payload.Event, botID, recordingID, transcriptID, reason)
 	if err != nil {
 		log.Printf("[TranscriptHandler] Error processing transcript: %v", err)
 	}

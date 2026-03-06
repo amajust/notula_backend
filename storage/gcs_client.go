@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"cloud.google.com/go/storage"
+	"google.golang.org/api/iterator"
 )
 
 type GCSClient struct {
@@ -57,6 +58,20 @@ func (g *GCSClient) UploadFromURL(ctx context.Context, url, objectName string) (
 	return fmt.Sprintf("gs://%s/%s", g.bucket, objectName), nil
 }
 
+// UploadData uploads raw bytes to GCS.
+func (g *GCSClient) UploadData(ctx context.Context, data []byte, objectName string) (string, error) {
+	sw := g.client.Bucket(g.bucket).Object(objectName).NewWriter(ctx)
+	if _, err := sw.Write(data); err != nil {
+		return "", fmt.Errorf("failed to write data to GCS: %v", err)
+	}
+
+	if err := sw.Close(); err != nil {
+		return "", fmt.Errorf("failed to close GCS writer: %v", err)
+	}
+
+	return fmt.Sprintf("gs://%s/%s", g.bucket, objectName), nil
+}
+
 // GenerateSignedURL creates a short-lived URL for the private GCS object.
 func (g *GCSClient) GenerateSignedURL(objectName string, expires time.Duration) (string, error) {
 	opts := &storage.SignedURLOptions{
@@ -69,7 +84,34 @@ func (g *GCSClient) GenerateSignedURL(objectName string, expires time.Duration) 
 	return g.client.Bucket(g.bucket).SignedURL(objectName, opts)
 }
 
-// GetPath returns the relative path in the bucket.
+// GetPath returns the relative path for video in the bucket.
 func (g *GCSClient) GetPath(uid, botID string) string {
 	return fmt.Sprintf("recordings/%s/%s.mp4", uid, botID)
+}
+
+// GetTranscriptPath returns the relative path for transcript in the bucket.
+func (g *GCSClient) GetTranscriptPath(uid, botID string) string {
+	return fmt.Sprintf("recordings/%s/%s_transcript.json", uid, botID)
+}
+
+// GetTotalStorageUsed calculates the total size of all objects under recordings/{uid}/
+func (g *GCSClient) GetTotalStorageUsed(ctx context.Context, uid string) (int64, error) {
+	prefix := fmt.Sprintf("recordings/%s/", uid)
+	it := g.client.Bucket(g.bucket).Objects(ctx, &storage.Query{
+		Prefix: prefix,
+	})
+
+	var totalSize int64
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return 0, fmt.Errorf("failed to list objects: %v", err)
+		}
+		totalSize += attrs.Size
+	}
+
+	return totalSize, nil
 }

@@ -42,7 +42,7 @@ func GetFriendlyRecallMessage(subCode string) string {
 	case "bot_kicked_from_waiting_room":
 		return "Failed: Bot kicked from waiting room by host"
 	case "bot_received_leave_call":
-		return "Meeting Ended: Bot received leave command"
+		return "Meeting Ended: Bot left early"
 	case "meeting_not_started":
 		return "Failed: Meeting had not started yet"
 

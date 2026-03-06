@@ -14,8 +14,10 @@ func GetFriendlyProcessingStatus(status string) string {
 		return "Recording permission allowed"
 	case "recording_permission_denied":
 		return "Permission to Record Denied"
-	case "in_call_recording", "processing":
+	case "in_call_recording":
 		return "Bot is Recording..."
+	case "processing":
+		return "Media Processing..."
 	case "breakout_room_opened":
 		return "Breakout rooms available"
 	case "breakout_room_entered":
@@ -26,10 +28,12 @@ func GetFriendlyProcessingStatus(status string) string {
 		return "Breakout rooms closed"
 	case "recording_done":
 		return "Media Ready (Fetching Transcript...)"
-	case "recorded", "done", "transcript.done":
+	case "recorded", "transcript.done":
 		return "Recorded (Transcript Ready)"
+	case "done":
+		return "Media Ready (Finalizing...)"
 	case "transcript.processing":
-		return "Processing transcript text..."
+		return "Generating Transcript..."
 	case "transcript.failed", "failed", "call_ended", "fatal":
 		return "Failed / Ended prematurely"
 	case "paused":

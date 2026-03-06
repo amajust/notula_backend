@@ -40,3 +40,4 @@ Thumbs.db
 
 # Audio uploads
 handlers/uploads/
+tmp_server

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
+	"google.golang.org/api/iterator"
 )
 
 // FirebaseStorageClient handles file uploads to Firebase Storage
@@ -114,4 +115,26 @@ func (c *FirebaseStorageClient) DeleteFile(storagePath string) error {
 // Close closes the storage client
 func (c *FirebaseStorageClient) Close() error {
 	return c.client.Close()
+}
+
+// GetTotalStorageUsed calculates the total size of all objects under recordings/{uid}/
+func (c *FirebaseStorageClient) GetTotalStorageUsed(ctx context.Context, uid string) (int64, error) {
+	prefix := fmt.Sprintf("recordings/%s/", uid)
+	it := c.client.Bucket(c.bucket).Objects(ctx, &storage.Query{
+		Prefix: prefix,
+	})
+
+	var totalSize int64
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return 0, fmt.Errorf("failed to list objects: %v", err)
+		}
+		totalSize += attrs.Size
+	}
+
+	return totalSize, nil
 }

@@ -2,9 +2,12 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"log"
 	"notulapro-backend/recall/events"
 	"notulapro-backend/storage"
 	"notulapro-backend/utils"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -15,8 +18,9 @@ type RecallClient interface {
 	CreateBot(meetingURL string, botName string, joinAt *time.Time) (*events.BotResponse, error)
 	GetBot(botID string) (*events.BotResponse, error)
 	LeaveBot(botID string) error
+	DeleteBot(botID string) error
 	StartAsyncTranscription(recordingID string) error
-	GetTranscript(botID string) ([]events.TranscriptElement, error)
+	GetTranscript(transcriptID string) ([]events.TranscriptElement, error)
 	DeleteMedia(botID string) error
 	SendChatMessage(botID string, text string) error
 }
@@ -25,11 +29,13 @@ type RecallClient interface {
 type BotRepository interface {
 	GetActiveBotByMeetingURL(ctx context.Context, meetingURL string) (string, error)
 	GetScheduledBotByMeetingURL(ctx context.Context, meetingURL string) (string, error)
+	GetLatestBotByMeetingURL(ctx context.Context, meetingURL string) (map[string]interface{}, error)
 	GetBotByID(ctx context.Context, botID string) (map[string]interface{}, error)
 	SaveBot(ctx context.Context, bot map[string]interface{}) error
 	UpdateBotStatus(ctx context.Context, botID string, status string) error
 	UpdateBotStatusAndSubCode(ctx context.Context, botID string, status string, subCode string) error
 	SaveTranscript(ctx context.Context, botID string, transcript interface{}) error
+	DeleteBotLocally(ctx context.Context, botID string) error
 }
 
 // BotHandler holds handler methods for bot-related routes.
@@ -74,10 +80,27 @@ func (h *BotHandler) SendBot(c *fiber.Ctx) error {
 	}
 
 	// Check if a bot already exists for this exact meeting URL
-	botID, err := h.repo.GetActiveBotByMeetingURL(c.Context(), body.MeetingURL)
-	if err == nil && botID != "" {
-		// An active bot already exists for this URL
-		return utils.HandleError(c, fiber.StatusConflict, "A bot is already active in this meeting URL.", err)
+	latestBot, err := h.repo.GetLatestBotByMeetingURL(c.Context(), body.MeetingURL)
+	if err == nil && latestBot != nil {
+		status, _ := latestBot["status"].(string)
+		botID, _ := latestBot["id"].(string)
+
+		// If active, return Conflict
+		activeStatuses := map[string]bool{
+			"joining":                      true,
+			"in_call_recording":            true,
+			"in_call_not_recording":        true,
+			"in_waiting_room":              true,
+			"joining_call":                 true,
+			"recording_permission_allowed": true,
+		}
+
+		if activeStatuses[status] {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"error":  "A bot is already active in this meeting.",
+				"bot_id": botID,
+			})
+		}
 	}
 
 	botName := "Notbot"
@@ -89,16 +112,34 @@ func (h *BotHandler) SendBot(c *fiber.Ctx) error {
 	if err != nil {
 		return utils.HandleError(c, fiber.StatusBadGateway, "Failed to connect to the recording service. Please check the meeting URL or try again later.", err)
 	}
+	log.Printf("[BotHandler] SendBot: Created bot with ID %s for URL %s", bot.ID, body.MeetingURL)
 
 	uid, ok := c.Locals("uid").(string)
 	if !ok {
-		uid = "unknown" // fallback if auth isn't strict yet
+		uid = "unknown"
 	}
 
-	// Save the new bot to Firestore for tracking and deduplication
+	// If we have a terminal bot for the same URL, we delete it to maintain "One card per meeting"
+	// This satisfies the "doesn't need to create new card" requirement for retries/join-again.
+	if latestBot != nil {
+		status, _ := latestBot["status"].(string)
+		subCode, _ := latestBot["sub_code"].(string)
+		isTerminal := status == "completed" || status == "failed" || status == "fatal" ||
+			status == "call_ended" || status == "cancelled" || status == "done" ||
+			subCode == "timeout_exceeded_waiting_room"
+
+		if isTerminal {
+			oldID, _ := latestBot["id"].(string)
+			if oldID != "" {
+				log.Printf("[BotHandler] Replacing old terminal bot %s for URL %s", oldID, body.MeetingURL)
+				_ = h.repo.DeleteBotLocally(c.Context(), oldID)
+			}
+		}
+	}
+
 	err = h.repo.SaveBot(c.Context(), map[string]interface{}{
 		"id":                bot.ID,
-		"uid":               uid, // Tie the bot to the person who requested it
+		"uid":               uid,
 		"meeting_url":       body.MeetingURL,
 		"status":            "joining",
 		"processing_status": "Bot is connecting...",
@@ -142,10 +183,27 @@ func (h *BotHandler) ScheduleBot(c *fiber.Ctx) error {
 	}
 
 	// Check if a scheduled bot already exists for this exact meeting URL
-	botID, err := h.repo.GetScheduledBotByMeetingURL(c.Context(), body.MeetingURL)
-	if err == nil && botID != "" {
-		// A bot is already attached to this URL
-		return utils.HandleError(c, fiber.StatusConflict, "A bot is already active or scheduled for this meeting URL.", err)
+	latestBot, err := h.repo.GetLatestBotByMeetingURL(c.Context(), body.MeetingURL)
+	if err == nil && latestBot != nil {
+		status, _ := latestBot["status"].(string)
+		botID, _ := latestBot["id"].(string)
+
+		activeStatuses := map[string]bool{
+			"scheduled":                    true,
+			"joining":                      true,
+			"in_call_recording":            true,
+			"in_call_not_recording":        true,
+			"in_waiting_room":              true,
+			"joining_call":                 true,
+			"recording_permission_allowed": true,
+		}
+
+		if activeStatuses[status] {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"error":  "A bot is already active or scheduled for this meeting.",
+				"bot_id": botID,
+			})
+		}
 	}
 
 	botName := "Notbot"
@@ -161,6 +219,23 @@ func (h *BotHandler) ScheduleBot(c *fiber.Ctx) error {
 	uid, ok := c.Locals("uid").(string)
 	if !ok {
 		uid = "unknown"
+	}
+
+	// If we have a terminal bot, we "re-use" the record by replacing it
+	if latestBot != nil { // Renamed from existingBot to latestBot to match the variable name above
+		status, _ := latestBot["status"].(string)
+		subCode, _ := latestBot["sub_code"].(string)
+		isTerminal := status == "completed" || status == "failed" || status == "fatal" ||
+			status == "call_ended" || status == "cancelled" || status == "done" ||
+			subCode == "timeout_exceeded_waiting_room"
+
+		if isTerminal {
+			oldID, _ := latestBot["id"].(string)
+			if oldID != "" {
+				log.Printf("[BotHandler] Replacing old terminal bot %s for scheduled URL %s", oldID, body.MeetingURL)
+				_ = h.repo.DeleteBotLocally(c.Context(), oldID)
+			}
+		}
 	}
 
 	// Save scheduled bot to Firestore
@@ -221,6 +296,41 @@ func (h *BotHandler) LeaveBot(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"message": "bot is leaving the call"})
 }
 
+// DeleteBot godoc
+// DELETE /bot/:id
+// Cancel a bot that is still connecting or in lobby.
+func (h *BotHandler) DeleteBot(c *fiber.Ctx) error {
+	botID := c.Params("id")
+	if botID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bot id is required"})
+	}
+
+	// 1. Tell Recall to leave the call first (safe for all states)
+	_ = h.recall.LeaveBot(botID) // Ignore error if it's not in a call
+
+	// 2. Tell Recall to delete the bot (only works for scheduled/unjoined bots)
+	err := h.recall.DeleteBot(botID)
+	if err != nil {
+		// If Recall says 405, it's a non-scheduled bot that has joined.
+		// We already called LeaveBot, so it's practically cancelled.
+		if strings.Contains(err.Error(), "recall_status:405") || strings.Contains(err.Error(), "cannot_delete_bot") {
+			log.Printf("[BotHandler] Bot %s cannot be deleted (405), but LeaveBot was called. Proceeding.", botID)
+		} else if strings.Contains(err.Error(), "recall_status:404") {
+			log.Printf("[BotHandler] Bot %s already gone (404). Proceeding.", botID)
+		} else {
+			return utils.HandleError(c, fiber.StatusBadGateway, "Failed to delete bot from Recall", err)
+		}
+	}
+
+	// 3. Delete from firestore entirely on "Cancel"
+	err = h.repo.DeleteBotLocally(c.Context(), botID)
+	if err != nil {
+		log.Printf("[BotHandler] Soft Error: Failed to delete record from Firestore for cancelled bot %s: %v", botID, err)
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
 // StartTranscript godoc
 // ...
 func (h *BotHandler) StartTranscript(c *fiber.Ctx) error {
@@ -269,4 +379,102 @@ func (h *BotHandler) GetRecordingURL(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"url": recallBot.Recordings[0].MediaShortcuts.VideoMixed.Data.DownloadURL})
+}
+
+// GetBotTranscript godoc
+// GET /bot/:id/transcript
+// Fetch transcript for a bot, with fallback to Recall if not in Firestore.
+func (h *BotHandler) GetBotTranscript(c *fiber.Ctx) error {
+	botID := c.Params("id")
+	log.Printf("[BotHandler] GetBotTranscript: Received request for bot %s", botID)
+	if botID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bot id is required"})
+	}
+
+	// 1. Check Firestore first
+	botDoc, err := h.repo.GetBotByID(c.Context(), botID)
+	if err == nil {
+		if transcript, ok := botDoc["transcript"]; ok && transcript != nil {
+			// Basic validation: check if it's just dummy data [{Start:0, End:0, Text:"", Speaker:""}]
+			tList, isList := transcript.([]interface{})
+			isValid := isList && len(tList) > 0
+			if isList && len(tList) == 1 {
+				first, isMap := tList[0].(map[string]interface{})
+				if isMap {
+					text, _ := first["text"].(string)
+					if text == "" {
+						text, _ = first["Text"].(string)
+					}
+					speaker, _ := first["speaker"].(string)
+					if speaker == "" {
+						speaker, _ = first["Speaker"].(string)
+					}
+
+					if text == "" && (speaker == "" || speaker == "Unknown") {
+						isValid = false
+						log.Printf("[BotHandler] Firestore transcript for bot %s is dummy data, fetching from Recall", botID)
+					}
+				}
+			}
+
+			if isValid {
+				return c.JSON(fiber.Map{"transcript": transcript})
+			}
+		}
+	}
+
+	// 2. Fallback: Fetch from Recall
+	recallBot, err := h.recall.GetBot(botID)
+	if err != nil {
+		return utils.HandleError(c, fiber.StatusBadGateway, "Failed to fetch bot from Recall", err)
+	}
+
+	botJSON, _ := json.MarshalIndent(recallBot, "", "  ")
+	log.Printf("[BotHandler] Recall Bot Response for %s:\n%s", botID, string(botJSON))
+
+	// Find the first "done" transcript (check top-level first, then recordings shortcuts)
+	var transcriptID string
+	for _, t := range recallBot.Transcripts {
+		if t.Status.Code == "done" {
+			transcriptID = t.ID
+			break
+		}
+	}
+
+	if transcriptID == "" {
+		for _, rec := range recallBot.Recordings {
+			if rec.MediaShortcuts.Transcript.Status.Code == "done" && rec.MediaShortcuts.Transcript.ID != "" {
+				transcriptID = rec.MediaShortcuts.Transcript.ID
+				log.Printf("[BotHandler] Found 'done' transcript %s in recording shortcut for bot %s", transcriptID, botID)
+				break
+			}
+		}
+	}
+
+	if transcriptID != "" {
+		log.Printf("[BotHandler] Using 'done' transcript %s for bot %s", transcriptID, botID)
+	}
+
+	if transcriptID == "" {
+		// If no transcript is "done", check if any are processing
+		for _, t := range recallBot.Transcripts {
+			if t.Status.Code == "processing" {
+				return c.Status(fiber.StatusAccepted).JSON(fiber.Map{"error": "transcript is still processing"})
+			}
+		}
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "transcript not available yet"})
+	}
+
+	// Fetch transcript data
+	transcript, err := h.recall.GetTranscript(transcriptID)
+	if err != nil {
+		return utils.HandleError(c, fiber.StatusBadGateway, "Failed to fetch transcript data from Recall", err)
+	}
+
+	// Save to Firestore for future
+	if err := h.repo.SaveTranscript(c.Context(), botID, transcript); err != nil {
+		log.Printf("[BotHandler] Error saving transcript to Firestore for bot %s: %v", botID, err)
+	}
+
+	return c.JSON(fiber.Map{"transcript": transcript})
 }

@@ -12,13 +12,26 @@ type BotResponse struct {
 					DownloadURL string `json:"download_url"`
 				} `json:"data"`
 			} `json:"video_mixed"`
+			Transcript struct {
+				ID     string `json:"id"`
+				Status struct {
+					Code string `json:"code"`
+				} `json:"status"`
+			} `json:"transcript"`
 		} `json:"media_shortcuts"`
 	} `json:"recordings"`
+	Transcripts []struct {
+		ID     string `json:"id"`
+		Status struct {
+			Code string `json:"code"`
+		} `json:"status"`
+	} `json:"transcripts"`
 }
 
 type TranscriptElement struct {
-	Speaker string  `json:"speaker"`
-	Text    string  `json:"text"`
-	Start   float64 `json:"start"`
-	End     float64 `json:"end"`
+	Speaker   string  `json:"speaker"`
+	Text      string  `json:"text"`
+	Start     float64 `json:"start"`
+	End       float64 `json:"end"`
+	Timestamp string  `json:"timestamp"`
 }
