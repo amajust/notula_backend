@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -17,8 +18,7 @@ func RecallWebhookAuth() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		secret := os.Getenv("RECALL_WEBHOOK_SECRET")
 		if secret == "" {
-			// If secret is not configured, we might want to fail securely,
-			// or just bypass if in early development. Let's fail securely.
+			log.Println("❌ [RecallWebhookAuth] RECALL_WEBHOOK_SECRET is not configured in .env. Webhook verification failed.")
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "webhook secret is not configured on the server",
 			})

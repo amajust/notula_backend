@@ -18,6 +18,12 @@ type BotResponse struct {
 					Code string `json:"code"`
 				} `json:"status"`
 			} `json:"transcript"`
+			ParticipantEvents struct {
+				ID   string `json:"id"`
+				Data struct {
+					ParticipantsDownloadURL string `json:"participants_download_url"`
+				} `json:"data"`
+			} `json:"participant_events"`
 		} `json:"media_shortcuts"`
 	} `json:"recordings"`
 	Transcripts []struct {
@@ -34,4 +40,15 @@ type TranscriptElement struct {
 	Start     float64 `json:"start"`
 	End       float64 `json:"end"`
 	Timestamp string  `json:"timestamp"`
+}
+
+type Calendar struct {
+	ID                 string                 `json:"id"`
+	Platform           string                 `json:"platform"`
+	Status             string                 `json:"status"`
+	AutomaticRecording map[string]interface{} `json:"automatic_recording"`
+}
+
+type CalendarOauthURL struct {
+	OauthURL string `json:"oauth_url"`
 }

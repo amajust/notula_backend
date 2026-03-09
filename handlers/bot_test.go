@@ -95,6 +95,17 @@ func (m *mockBotRepository) DeleteBotLocally(ctx context.Context, botID string) 
 	return nil
 }
 
+type mockBotScheduler struct {
+	scheduleBotFunc func(ctx context.Context, uid string, userName string, meetingURL string, joinAt time.Time) (string, error)
+}
+
+func (m *mockBotScheduler) ScheduleBot(ctx context.Context, uid string, userName string, meetingURL string, joinAt time.Time) (string, error) {
+	if m.scheduleBotFunc != nil {
+		return m.scheduleBotFunc(ctx, uid, userName, meetingURL, joinAt)
+	}
+	return "bot-scheduled", nil
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 func TestBotHandler_SendBot_Success(t *testing.T) {
@@ -118,7 +129,7 @@ func TestBotHandler_SendBot_Success(t *testing.T) {
 		},
 	}
 
-	handler := NewBotHandler(mockRecall, mockRepo, nil)
+	handler := NewBotHandler(mockRecall, mockRepo, nil, &mockBotScheduler{})
 
 	app.Post("/bot/send", func(c *fiber.Ctx) error {
 		c.Locals("uid", "user-123")
@@ -147,7 +158,7 @@ func TestBotHandler_SendBot_Conflict(t *testing.T) {
 		},
 	}
 
-	handler := NewBotHandler(nil, mockRepo, nil)
+	handler := NewBotHandler(nil, mockRepo, nil, &mockBotScheduler{})
 	app.Post("/bot/send", handler.SendBot)
 
 	body := sendBotBody{MeetingURL: "https://zoom.us/j/123"}
@@ -181,7 +192,7 @@ func TestBotHandler_ScheduleBot_Success(t *testing.T) {
 		},
 	}
 
-	handler := NewBotHandler(mockRecall, mockRepo, nil)
+	handler := NewBotHandler(mockRecall, mockRepo, nil, &mockBotScheduler{})
 
 	app.Post("/bot/schedule", func(c *fiber.Ctx) error {
 		c.Locals("uid", "user-123")
@@ -207,7 +218,7 @@ func TestBotHandler_ScheduleBot_Success(t *testing.T) {
 
 func TestBotHandler_ScheduleBot_TooSoon(t *testing.T) {
 	app := fiber.New()
-	handler := NewBotHandler(nil, nil, nil)
+	handler := NewBotHandler(nil, nil, nil, &mockBotScheduler{})
 
 	app.Post("/bot/schedule", handler.ScheduleBot)
 
@@ -235,7 +246,7 @@ func TestBotHandler_GetBotStatus(t *testing.T) {
 			return &events.BotResponse{ID: botID}, nil
 		},
 	}
-	handler := NewBotHandler(mockRecall, nil, nil)
+	handler := NewBotHandler(mockRecall, nil, nil, &mockBotScheduler{})
 	app.Get("/bot/:id", handler.GetBotStatus)
 
 	req := httptest.NewRequest(http.MethodGet, "/bot/bot-123", nil)
@@ -253,7 +264,7 @@ func TestBotHandler_LeaveBot(t *testing.T) {
 			return nil
 		},
 	}
-	handler := NewBotHandler(mockRecall, nil, nil)
+	handler := NewBotHandler(mockRecall, nil, nil, &mockBotScheduler{})
 	app.Post("/bot/:id/leave", handler.LeaveBot)
 
 	req := httptest.NewRequest(http.MethodPost, "/bot/bot-123/leave", nil)
@@ -271,7 +282,7 @@ func TestBotHandler_StartTranscript(t *testing.T) {
 			return nil
 		},
 	}
-	handler := NewBotHandler(mockRecall, nil, nil)
+	handler := NewBotHandler(mockRecall, nil, nil, &mockBotScheduler{})
 	app.Post("/recording/:id/transcript", handler.StartTranscript)
 
 	req := httptest.NewRequest(http.MethodPost, "/recording/rec-123/transcript", nil)

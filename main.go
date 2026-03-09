@@ -21,6 +21,7 @@ import (
 	"notulapro-backend/recall/events"
 	recallhandlers "notulapro-backend/recall/handlers"
 	"notulapro-backend/repository"
+	"notulapro-backend/services"
 	"notulapro-backend/storage"
 )
 
@@ -119,9 +120,13 @@ func main() {
 	}
 
 	// ─── Handlers ───
-	botHandler := handlers.NewBotHandler(recallClient, botRepo, gcsClient)
+	userRepo := repository.NewFirestoreUserRepository(firestoreClient)
+	botService := services.NewBotService(recallClient, botRepo)
+
+	botHandler := handlers.NewBotHandler(recallClient, botRepo, gcsClient, botService)
 	recordingHandler := handlers.NewRecordingHandler(recordingRepo, gladiaClient, firebaseStorageClient)
-	userHandler := handlers.NewUserHandler(gcsClient, firebaseStorageClient)
+	userHandler := handlers.NewUserHandler(userRepo, gcsClient, firebaseStorageClient)
+	calendarHandler := handlers.NewCalendarHandler(recallClient, userRepo)
 
 	// ─── Recall Webhook System (Granular) ───
 	botEventProc := events.NewBotEventProcessor(botRepo)
@@ -149,7 +154,7 @@ func main() {
 		}
 	}()
 
-	// Webhooks (must be defined BEFORE the /api/v1 auth group to bypass middleware)
+	// ─── Webhooks ───
 	webhook := app.Group("/api/v1/webhook/recall", middleware.RecallWebhookAuth())
 	webhook.Post("/bot", recallBotHandler.Handle)
 	webhook.Post("/recording", recallRecHandler.Handle)
@@ -169,6 +174,13 @@ func main() {
 
 	// User routes
 	api.Get("/user/storage", userHandler.GetStorageUsage)
+	api.Get("/user/profile", userHandler.GetUserProfile)
+	api.Patch("/user/preferences", userHandler.UpdatePreferences)
+
+	// Calendar routes
+	api.Post("/calendar/connect", calendarHandler.ConnectCalendar)
+	api.Get("/calendar/status", calendarHandler.GetCalendarStatus)
+	api.Patch("/calendar/settings", calendarHandler.SyncAutoJoinSettings)
 
 	// Recording routes
 	api.Get("/recording/:id/url", botHandler.GetRecordingURL)

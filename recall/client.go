@@ -72,6 +72,9 @@ func (c *Client) CreateBot(meetingURL string, botName string, joinAt *time.Time)
 		MeetingURL: meetingURL,
 		BotName:    botName,
 		JoinAt:     joinAt,
+		RecordingConfig: map[string]interface{}{
+			"meeting_metadata": map[string]interface{}{},
+		},
 	}
 	return c.postBot(req)
 }
@@ -288,8 +291,19 @@ func (c *Client) GetTranscript(transcriptID string) ([]events.TranscriptElement,
 	}
 	defer transResp.Body.Close()
 
-	if transResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download URL returned status %d", transResp.StatusCode)
+	var rawSegments []json.RawMessage
+	bodyBytes, err := io.ReadAll(transResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read transcript body: %w", err)
+	}
+	limit := 500
+	if len(bodyBytes) < limit {
+		limit = len(bodyBytes)
+	}
+	log.Printf("[RecallClient] Raw Transcript JSON (first %d chars): %s", limit, string(bodyBytes[:limit]))
+
+	if err := json.Unmarshal(bodyBytes, &rawSegments); err != nil {
+		return nil, fmt.Errorf("failed to decode transcript JSON: %w", err)
 	}
 
 	type recallWord struct {
@@ -304,14 +318,15 @@ func (c *Client) GetTranscript(transcriptID string) ([]events.TranscriptElement,
 
 	type recallSegment struct {
 		Participant struct {
-			Name string `json:"name"`
+			ID   interface{} `json:"id"`
+			Name string      `json:"name"`
 		} `json:"participant"`
 		Words []recallWord `json:"words"`
 	}
 
 	var segments []recallSegment
-	if err := json.NewDecoder(transResp.Body).Decode(&segments); err != nil {
-		return nil, fmt.Errorf("failed to decode transcript JSON: %w", err)
+	if err := json.Unmarshal(bodyBytes, &segments); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal into recallSegments: %w", err)
 	}
 
 	var transcript []events.TranscriptElement
@@ -330,7 +345,11 @@ func (c *Client) GetTranscript(transcriptID string) ([]events.TranscriptElement,
 
 		speaker := s.Participant.Name
 		if speaker == "" {
-			speaker = "Unknown"
+			if s.Participant.ID != nil {
+				speaker = fmt.Sprintf("Speaker %v", s.Participant.ID)
+			} else {
+				speaker = "Unknown"
+			}
 		}
 
 		start := s.Words[0].StartTimestamp.Relative
@@ -366,6 +385,118 @@ func (c *Client) DeleteMedia(botID string) error {
 	defer resp.Body.Close()
 
 	return c.checkStatus(resp)
+}
+
+// ─── Calendar methods ─────────────────────────────────────────────────────────
+
+// CreateCalendar creates a new calendar object in Recall.
+func (c *Client) CreateCalendar() (*events.Calendar, error) {
+	url := c.baseURL + "/calendar/"
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.setHeaders(req)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if err := c.checkStatus(resp); err != nil {
+		return nil, err
+	}
+
+	var cal events.Calendar
+	if err := json.NewDecoder(resp.Body).Decode(&cal); err != nil {
+		return nil, err
+	}
+	return &cal, nil
+}
+
+// GetCalendarOauthURL fetches the OAuth connect URL for a specific calendar.
+func (c *Client) GetCalendarOauthURL(calendarID string) (string, error) {
+	url := fmt.Sprintf("%s/calendar/%s/oauth_url/", c.baseURL, calendarID)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	c.setHeaders(req)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if err := c.checkStatus(resp); err != nil {
+		return "", err
+	}
+
+	var res events.CalendarOauthURL
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return "", err
+	}
+	return res.OauthURL, nil
+}
+
+// GetCalendar fetches a single calendar's status.
+func (c *Client) GetCalendar(calendarID string) (*events.Calendar, error) {
+	url := fmt.Sprintf("%s/calendar/%s/", c.baseURL, calendarID)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.setHeaders(req)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if err := c.checkStatus(resp); err != nil {
+		return nil, err
+	}
+
+	var cal events.Calendar
+	if err := json.NewDecoder(resp.Body).Decode(&cal); err != nil {
+		return nil, err
+	}
+	return &cal, nil
+}
+
+// UpdateCalendar updates calendar settings (e.g. automatic_recording).
+func (c *Client) UpdateCalendar(calendarID string, payload map[string]interface{}) (*events.Calendar, error) {
+	url := fmt.Sprintf("%s/calendar/%s/", c.baseURL, calendarID)
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewBuffer(data))
+	if err != nil {
+		return nil, err
+	}
+	c.setHeaders(req)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if err := c.checkStatus(resp); err != nil {
+		return nil, err
+	}
+
+	var cal events.Calendar
+	if err := json.NewDecoder(resp.Body).Decode(&cal); err != nil {
+		return nil, err
+	}
+	return &cal, nil
 }
 
 func (c *Client) setHeaders(req *http.Request) {

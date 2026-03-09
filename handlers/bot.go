@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"notulapro-backend/recall/events"
 	"notulapro-backend/storage"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 )
+
+var ErrBotAlreadyExists = errors.New("bot already exists")
 
 // RecallClient defines the interface for interacting with Recall.ai.
 type RecallClient interface {
@@ -43,11 +46,16 @@ type BotHandler struct {
 	recall  RecallClient
 	repo    BotRepository
 	storage *storage.GCSClient
+	service BotScheduler
+}
+
+type BotScheduler interface {
+	ScheduleBot(ctx context.Context, uid string, userName string, meetingURL string, joinAt time.Time) (string, error)
 }
 
 // NewBotHandler creates a handler with dependencies.
-func NewBotHandler(r RecallClient, repo BotRepository, s *storage.GCSClient) *BotHandler {
-	return &BotHandler{recall: r, repo: repo, storage: s}
+func NewBotHandler(r RecallClient, repo BotRepository, s *storage.GCSClient, service BotScheduler) *BotHandler {
+	return &BotHandler{recall: r, repo: repo, storage: s, service: service}
 }
 
 // ─── Request bodies ───────────────────────────────────────────────────────────
@@ -160,6 +168,13 @@ func (h *BotHandler) SendBot(c *fiber.Ctx) error {
 // POST /bot/schedule
 // Schedule Notbot to join a meeting at a future time (must be >10 min away).
 func (h *BotHandler) ScheduleBot(c *fiber.Ctx) error {
+	uid, ok := c.Locals("uid").(string)
+	if !ok {
+		uid = "unknown"
+	}
+
+	name, _ := c.Locals("name").(string)
+
 	var body scheduleBotBody
 	if err := c.BodyParser(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -182,81 +197,19 @@ func (h *BotHandler) ScheduleBot(c *fiber.Ctx) error {
 		})
 	}
 
-	// Check if a scheduled bot already exists for this exact meeting URL
-	latestBot, err := h.repo.GetLatestBotByMeetingURL(c.Context(), body.MeetingURL)
-	if err == nil && latestBot != nil {
-		status, _ := latestBot["status"].(string)
-		botID, _ := latestBot["id"].(string)
-
-		activeStatuses := map[string]bool{
-			"scheduled":                    true,
-			"joining":                      true,
-			"in_call_recording":            true,
-			"in_call_not_recording":        true,
-			"in_waiting_room":              true,
-			"joining_call":                 true,
-			"recording_permission_allowed": true,
-		}
-
-		if activeStatuses[status] {
+	// Use the service to schedule
+	botID, err := h.service.ScheduleBot(c.Context(), uid, name, body.MeetingURL, body.JoinAt)
+	if err != nil {
+		if err == ErrBotAlreadyExists {
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 				"error":  "A bot is already active or scheduled for this meeting.",
 				"bot_id": botID,
 			})
 		}
-	}
-
-	botName := "Notbot"
-	if name, ok := c.Locals("name").(string); ok && name != "" {
-		botName = "Notbot on behalf of " + name
-	}
-
-	bot, err := h.recall.CreateBot(body.MeetingURL, botName, &body.JoinAt)
-	if err != nil {
 		return utils.HandleError(c, fiber.StatusBadGateway, "Failed to schedule the recording bot. Please check the meeting URL and try again.", err)
 	}
 
-	uid, ok := c.Locals("uid").(string)
-	if !ok {
-		uid = "unknown"
-	}
-
-	// If we have a terminal bot, we "re-use" the record by replacing it
-	if latestBot != nil { // Renamed from existingBot to latestBot to match the variable name above
-		status, _ := latestBot["status"].(string)
-		subCode, _ := latestBot["sub_code"].(string)
-		isTerminal := status == "completed" || status == "failed" || status == "fatal" ||
-			status == "call_ended" || status == "cancelled" || status == "done" ||
-			subCode == "timeout_exceeded_waiting_room"
-
-		if isTerminal {
-			oldID, _ := latestBot["id"].(string)
-			if oldID != "" {
-				log.Printf("[BotHandler] Replacing old terminal bot %s for scheduled URL %s", oldID, body.MeetingURL)
-				_ = h.repo.DeleteBotLocally(c.Context(), oldID)
-			}
-		}
-	}
-
-	// Save scheduled bot to Firestore
-	err = h.repo.SaveBot(c.Context(), map[string]interface{}{
-		"id":                bot.ID,
-		"uid":               uid,
-		"meeting_url":       body.MeetingURL,
-		"status":            "scheduled",
-		"processing_status": "Scheduled",
-		"type":              "virtual",
-		"title":             "Scheduled: " + body.MeetingURL,
-		"tags":              []string{"Scheduled"},
-		"createdAt":         time.Now(),
-		"join_at":           body.JoinAt,
-	})
-
-	if err != nil {
-		utils.HandleError(c, fiber.StatusInternalServerError, "Soft Error: Failed to save scheduled bot to firestore", err)
-	}
-
-	return c.Status(fiber.StatusCreated).JSON(bot)
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"id": botID})
 }
 
 // GetBotStatus godoc

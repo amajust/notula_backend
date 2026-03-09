@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"log"
+	"notulapro-backend/repository"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -11,13 +12,20 @@ type StorageClient interface {
 	GetTotalStorageUsed(ctx context.Context, uid string) (int64, error)
 }
 
+type UserRepository interface {
+	GetProfile(ctx context.Context, uid string) (*repository.UserProfile, error)
+	UpdatePreferences(ctx context.Context, uid string, prefs repository.UserPreferences) error
+}
+
 type UserHandler struct {
+	repo     UserRepository
 	gcs      StorageClient
 	firebase StorageClient
 }
 
-func NewUserHandler(gcs StorageClient, firebase StorageClient) *UserHandler {
+func NewUserHandler(repo UserRepository, gcs StorageClient, firebase StorageClient) *UserHandler {
 	return &UserHandler{
+		repo:     repo,
 		gcs:      gcs,
 		firebase: firebase,
 	}
@@ -64,4 +72,46 @@ func (h *UserHandler) GetStorageUsage(c *fiber.Ctx) error {
 		"used_bytes":  totalUsed,
 		"limit_bytes": limit,
 	})
+}
+
+func (h *UserHandler) GetUserProfile(c *fiber.Ctx) error {
+	uid, ok := c.Locals("uid").(string)
+	if !ok || uid == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	profile, err := h.repo.GetProfile(c.Context(), uid)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to get user profile",
+		})
+	}
+
+	return c.JSON(profile)
+}
+
+func (h *UserHandler) UpdatePreferences(c *fiber.Ctx) error {
+	uid, ok := c.Locals("uid").(string)
+	if !ok || uid == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	var prefs repository.UserPreferences
+	if err := c.BodyParser(&prefs); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	if err := h.repo.UpdatePreferences(c.Context(), uid, prefs); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to update preferences",
+		})
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
 }
