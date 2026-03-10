@@ -28,28 +28,52 @@ type mockRecallClient struct {
 }
 
 func (m *mockRecallClient) CreateBot(meetingURL string, botName string, joinAt *time.Time) (*events.BotResponse, error) {
-	return m.createBotFunc(meetingURL, botName, joinAt)
+	if m.createBotFunc != nil {
+		return m.createBotFunc(meetingURL, botName, joinAt)
+	}
+	return &events.BotResponse{ID: "mock-bot"}, nil
 }
 func (m *mockRecallClient) GetBot(botID string) (*events.BotResponse, error) {
-	return m.getBotFunc(botID)
+	if m.getBotFunc != nil {
+		return m.getBotFunc(botID)
+	}
+	return &events.BotResponse{ID: botID}, nil
 }
 func (m *mockRecallClient) LeaveBot(botID string) error {
-	return m.leaveBotFunc(botID)
+	if m.leaveBotFunc != nil {
+		return m.leaveBotFunc(botID)
+	}
+	return nil
 }
 func (m *mockRecallClient) DeleteBot(botID string) error {
-	return m.deleteBotFunc(botID)
+	if m.deleteBotFunc != nil {
+		return m.deleteBotFunc(botID)
+	}
+	return nil
 }
 func (m *mockRecallClient) StartAsyncTranscription(recordingID string) error {
-	return m.startAsyncTranscriptionFunc(recordingID)
+	if m.startAsyncTranscriptionFunc != nil {
+		return m.startAsyncTranscriptionFunc(recordingID)
+	}
+	return nil
 }
 func (m *mockRecallClient) GetTranscript(botID string) ([]events.TranscriptElement, error) {
-	return m.getTranscriptFunc(botID)
+	if m.getTranscriptFunc != nil {
+		return m.getTranscriptFunc(botID)
+	}
+	return []events.TranscriptElement{}, nil
 }
 func (m *mockRecallClient) DeleteMedia(botID string) error {
-	return m.deleteMediaFunc(botID)
+	if m.deleteMediaFunc != nil {
+		return m.deleteMediaFunc(botID)
+	}
+	return nil
 }
 func (m *mockRecallClient) SendChatMessage(botID string, text string) error {
-	return m.sendChatMessageFunc(botID, text)
+	if m.sendChatMessageFunc != nil {
+		return m.sendChatMessageFunc(botID, text)
+	}
+	return nil
 }
 
 type mockBotRepository struct {
@@ -65,19 +89,34 @@ type mockBotRepository struct {
 }
 
 func (m *mockBotRepository) GetActiveBotByMeetingURL(ctx context.Context, meetingURL string) (string, error) {
-	return m.getActiveBotFunc(ctx, meetingURL)
+	if m.getActiveBotFunc != nil {
+		return m.getActiveBotFunc(ctx, meetingURL)
+	}
+	return "", nil
 }
 func (m *mockBotRepository) GetScheduledBotByMeetingURL(ctx context.Context, meetingURL string) (string, error) {
-	return m.getScheduledBotFunc(ctx, meetingURL)
+	if m.getScheduledBotFunc != nil {
+		return m.getScheduledBotFunc(ctx, meetingURL)
+	}
+	return "", nil
 }
 func (m *mockBotRepository) GetLatestBotByMeetingURL(ctx context.Context, meetingURL string) (map[string]interface{}, error) {
-	return m.getLatestBotFunc(ctx, meetingURL)
+	if m.getLatestBotFunc != nil {
+		return m.getLatestBotFunc(ctx, meetingURL)
+	}
+	return nil, nil
 }
 func (m *mockBotRepository) SaveBot(ctx context.Context, bot map[string]interface{}) error {
-	return m.saveBotFunc(ctx, bot)
+	if m.saveBotFunc != nil {
+		return m.saveBotFunc(ctx, bot)
+	}
+	return nil
 }
 func (m *mockBotRepository) GetBotByID(ctx context.Context, botID string) (map[string]interface{}, error) {
-	return m.getBotByIDFunc(ctx, botID)
+	if m.getBotByIDFunc != nil {
+		return m.getBotByIDFunc(ctx, botID)
+	}
+	return nil, nil
 }
 func (m *mockBotRepository) UpdateBotStatus(ctx context.Context, botID string, status string) error {
 	return nil
@@ -86,7 +125,10 @@ func (m *mockBotRepository) UpdateBotStatusAndSubCode(ctx context.Context, botID
 	return nil
 }
 func (m *mockBotRepository) SaveTranscript(ctx context.Context, botID string, transcript interface{}) error {
-	return m.saveTranscriptFunc(ctx, botID, transcript)
+	if m.saveTranscriptFunc != nil {
+		return m.saveTranscriptFunc(ctx, botID, transcript)
+	}
+	return nil
 }
 func (m *mockBotRepository) DeleteBotLocally(ctx context.Context, botID string) error {
 	if m.deleteBotLocallyFunc != nil {
@@ -153,12 +195,15 @@ func TestBotHandler_SendBot_Conflict(t *testing.T) {
 	app := fiber.New()
 
 	mockRepo := &mockBotRepository{
-		getActiveBotFunc: func(ctx context.Context, meetingURL string) (string, error) {
-			return "existing-bot-id", nil
+		getLatestBotFunc: func(ctx context.Context, meetingURL string) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"id":     "existing-bot-id",
+				"status": "joining",
+			}, nil
 		},
 	}
 
-	handler := NewBotHandler(nil, mockRepo, nil, &mockBotScheduler{})
+	handler := NewBotHandler(&mockRecallClient{}, mockRepo, nil, &mockBotScheduler{})
 	app.Post("/bot/send", handler.SendBot)
 
 	body := sendBotBody{MeetingURL: "https://zoom.us/j/123"}
