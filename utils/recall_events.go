@@ -14,7 +14,7 @@ func GetFriendlyProcessingStatus(status string) string {
 		return "Recording permission allowed"
 	case "recording_permission_denied":
 		return "Permission to Record Denied"
-	case "in_call_recording":
+	case "in_call_recording", "started", "recording_started", "recording.started":
 		return "Bot is Recording..."
 	case "processing":
 		return "Media Processing..."
@@ -42,6 +42,8 @@ func GetFriendlyProcessingStatus(status string) string {
 		return "Recording Deleted"
 	case "completed", "archived":
 		return "Completed"
+	case "timeout_exceeded_everyone_left", "call_ended_by_host":
+		return "Meeting Ended"
 	}
 
 	// Fallbacks
